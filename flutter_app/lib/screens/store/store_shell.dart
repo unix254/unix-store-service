@@ -8,8 +8,10 @@ import 'inventory_screen.dart';
 import 'yield_config_screen.dart';
 import 'variance_screen.dart';
 import 'staff_management_screen.dart';
+import 'pay_runs_screen.dart';
+import 'purchase_orders_screen.dart';
 
-enum _NavItem { suppliers, inventory, requisitions, yield_, variance, staff }
+enum _NavItem { suppliers, inventory, requisitions, yield_, variance, payRuns, purchaseOrders, staff }
 
 class StoreShell extends StatefulWidget {
   final Staff staff;
@@ -24,16 +26,18 @@ class _StoreShellState extends State<StoreShell> {
 
   // Core nav items available to all store/manager roles
   static const _coreNavItems = [
-    (icon: Icons.people_alt_rounded,  label: 'Suppliers',     item: _NavItem.suppliers),
-    (icon: Icons.inventory_2_rounded, label: 'Inventory',     item: _NavItem.inventory),
-    (icon: Icons.assignment_rounded,  label: 'Requisitions',  item: _NavItem.requisitions),
-    (icon: Icons.tune_rounded,        label: 'Yield Config',  item: _NavItem.yield_),
-    (icon: Icons.analytics_rounded,   label: 'Variance',      item: _NavItem.variance),
+    (icon: Icons.people_alt_rounded,    label: 'Suppliers',        item: _NavItem.suppliers),
+    (icon: Icons.inventory_2_rounded,   label: 'Inventory',        item: _NavItem.inventory),
+    (icon: Icons.assignment_rounded,    label: 'Requisitions',     item: _NavItem.requisitions),
+    (icon: Icons.tune_rounded,          label: 'Yield Config',     item: _NavItem.yield_),
+    (icon: Icons.analytics_rounded,     label: 'Variance',         item: _NavItem.variance),
+    (icon: Icons.shopping_cart_rounded, label: 'Purchase Orders',  item: _NavItem.purchaseOrders),
   ];
 
   // Manager-only nav items
   static const _managerNavItems = [
-    (icon: Icons.badge_rounded, label: 'Staff', item: _NavItem.staff),
+    (icon: Icons.payments_rounded,  label: 'Pay Runs',  item: _NavItem.payRuns),
+    (icon: Icons.badge_rounded,     label: 'Staff',     item: _NavItem.staff),
   ];
 
   List<({IconData icon, String label, _NavItem item})> get _navItems => [
@@ -53,6 +57,10 @@ class _StoreShellState extends State<StoreShell> {
         return const YieldConfigScreen();
       case _NavItem.variance:
         return const VarianceScreen();
+      case _NavItem.purchaseOrders:
+        return PurchaseOrdersScreen(staff: widget.staff);
+      case _NavItem.payRuns:
+        return PayRunsScreen(staff: widget.staff);
       case _NavItem.staff:
         return const StaffManagementScreen();
     }
@@ -60,24 +68,60 @@ class _StoreShellState extends State<StoreShell> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.scaffold,
-      body: Row(
-        children: [
-          // ── Sidebar ─────────────────────────────────────────
-          _Sidebar(
-            staff: widget.staff,
-            selected: _selected,
-            navItems: _navItems,
-            onSelect: (item) => setState(() => _selected = item),
-            onLogout: () => Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const PinLoginScreen()),
-            ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 800;
+
+        return Scaffold(
+          backgroundColor: AppTheme.scaffold,
+          appBar: isMobile
+              ? AppBar(
+                  backgroundColor: AppTheme.sidebar,
+                  title: const Text('YUNIX STORE',
+                      style: TextStyle(
+                          color: AppTheme.pinTeal,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 2)),
+                  iconTheme: const IconThemeData(color: Colors.white),
+                )
+              : null,
+          drawer: isMobile
+              ? Drawer(
+                  backgroundColor: AppTheme.sidebar,
+                  child: _Sidebar(
+                    staff: widget.staff,
+                    selected: _selected,
+                    navItems: _navItems,
+                    onSelect: (item) {
+                      setState(() => _selected = item);
+                      Navigator.pop(context);
+                    },
+                    onLogout: () => Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(builder: (_) => const PinLoginScreen()),
+                    ),
+                  ),
+                )
+              : null,
+          body: Row(
+            children: [
+              // ── Sidebar (Desktop) ──────────────────────────────
+              if (!isMobile)
+                _Sidebar(
+                  staff: widget.staff,
+                  selected: _selected,
+                  navItems: _navItems,
+                  onSelect: (item) => setState(() => _selected = item),
+                  onLogout: () => Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(builder: (_) => const PinLoginScreen()),
+                  ),
+                ),
+              // ── Content ─────────────────────────────────────────
+              Expanded(child: _body()),
+            ],
           ),
-          // ── Content ─────────────────────────────────────────
-          Expanded(child: _body()),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -102,9 +146,10 @@ class _Sidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 220,
+      width: 260, // Slightly wider for mobile tap targets and standard look
       color: AppTheme.sidebar,
-      child: Column(
+      child: SafeArea(
+        child: Column(
         children: [
           // ── Header ──────────────────────────────────────────
           Padding(
@@ -192,6 +237,7 @@ class _Sidebar extends StatelessWidget {
             ),
           ),
         ],
+      ),
       ),
     );
   }

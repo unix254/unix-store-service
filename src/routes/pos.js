@@ -105,32 +105,35 @@ router.get('/sales/range', async (req, res) => {
 // Compares what the store ISSUED (unix_requisitions, purpose=Sales, today)
 // vs what the POS SOLD (ticketlines, today), using the yield config to convert.
 //
-// Expected consumption = total_units_sold / portions_per_unit
-// Actual issued        = sum of issued requisition quantities for that store item
+// AGGREGATION FIX: Group by inventory item (i.id) to prevent double-counting
+// actual_issued when one ingredient maps to multiple POS products.
+// Expected consumption = SUM( total_units_sold / portions_per_unit ) across all mapped products.
+// Actual issued        = (Total Sales issues) - (Logged Wastage) for today — waste is excluded.
 // Variance             = actual_issued - expected_consumption  (positive = over-issued = potential loss)
 router.get('/variance/today', async (req, res) => {
   try {
     const rows = await query(`
       SELECT
-        i.id                            AS inventory_item_id,
-        i.name                          AS inventory_item_name,
+        i.id                                AS inventory_item_id,
+        i.name                              AS inventory_item_name,
         i.unit_of_measure,
-        yc.unicenta_product_id,
-        p.name                          AS pos_product_name,
-        yc.portions_per_unit,
-        COALESCE(sales.total_sold, 0)   AS total_sold,
-        ROUND(COALESCE(sales.total_sold, 0) / yc.portions_per_unit, 3)
-                                        AS expected_consumption,
-        COALESCE(issued.total_issued, 0) AS actual_issued,
+        -- Concatenate all mapped POS product names for display
+        GROUP_CONCAT(p.name ORDER BY p.name SEPARATOR ' / ')
+                                            AS pos_product_name,
+        -- Sum expected consumption across all POS product mappings
+        ROUND(SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit), 3)
+                                            AS expected_consumption,
+        COALESCE(issued.total_issued, 0)    AS actual_issued,
         ROUND(
           COALESCE(issued.total_issued, 0)
-          - (COALESCE(sales.total_sold, 0) / yc.portions_per_unit),
+          - SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit),
           3
-        )                               AS variance
+        )                                   AS variance
       FROM unix_yield_config yc
-      JOIN unix_store_inventory i ON i.id = yc.inventory_item_id
-      LEFT JOIN products p ON p.id = yc.unicenta_product_id
+      JOIN unix_store_inventory i  ON i.id  = yc.inventory_item_id
+      LEFT JOIN products p         ON p.id  = yc.unicenta_product_id
       LEFT JOIN (
+        -- Today's POS sales per product
         SELECT tl.product, SUM(tl.units) AS total_sold
         FROM ticketlines tl
         JOIN tickets t  ON t.id = tl.ticket
@@ -140,13 +143,21 @@ router.get('/variance/today', async (req, res) => {
         GROUP BY tl.product
       ) sales ON sales.product = yc.unicenta_product_id
       LEFT JOIN (
-        SELECT inventory_item_id, SUM(quantity) AS total_issued
+        -- Actual issued = Sales issues MINUS kitchen-logged wastage for today.
+        -- Waste is excluded so dropped items don't inflate the kitchen's variance.
+        SELECT
+          inventory_item_id,
+          SUM(CASE WHEN purpose = 'Sales'    THEN quantity ELSE 0 END)
+          - SUM(CASE WHEN purpose = 'Wastage' THEN quantity ELSE 0 END)
+            AS total_issued
         FROM unix_requisitions
-        WHERE purpose = 'Sales'
-          AND status = 'Issued'
+        WHERE status = 'Issued'
+          AND purpose IN ('Sales', 'Wastage')
           AND DATE(issued_at) = CURDATE()
         GROUP BY inventory_item_id
       ) issued ON issued.inventory_item_id = yc.inventory_item_id
+      -- GROUP BY inventory item to collapse multiple POS-product mappings
+      GROUP BY i.id, i.name, i.unit_of_measure, issued.total_issued
       ORDER BY ABS(variance) DESC
     `);
     res.json(rows);

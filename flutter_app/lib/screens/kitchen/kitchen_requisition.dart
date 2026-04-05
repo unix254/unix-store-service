@@ -26,6 +26,7 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
   double _qty = 1.0;
   String _purpose = 'Sales'; // 'Sales' | 'Staff Meal'
   final _notesCtrl = TextEditingController();
+  String _search = '';
 
   List<Requisition> _myRequests = [];
   bool _loadingItems = true;
@@ -91,6 +92,114 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
     });
   }
 
+  Future<void> _logWaste() async {
+    if (_picked == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Select an item first, then tap Log Waste.'),
+        backgroundColor: Colors.orange,
+      ));
+      return;
+    }
+    final qtyCtrl   = TextEditingController(text: _qty.toStringAsFixed(1));
+    final notesCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A2634),
+        title: Row(children: const [
+          Icon(Icons.delete_rounded, color: Color(0xFFEF5350), size: 22),
+          SizedBox(width: 8),
+          Text('Log Wastage / Spoilage',
+              style: TextStyle(color: Colors.white, fontSize: 16)),
+        ]),
+        content: SizedBox(
+          width: 340,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Item: ${_picked!.name}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 14)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: qtyCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Wasted Quantity (${_picked!.unitOfMeasure})',
+                  labelStyle: const TextStyle(color: Colors.white54),
+                  enabledBorder: const OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white24)),
+                  focusedBorder: const OutlineInputBorder(
+                      borderSide: BorderSide(color: Color(0xFFEF5350))),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: notesCtrl,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Reason (optional)',
+                  labelStyle: TextStyle(color: Colors.white54),
+                  enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white24)),
+                  focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Color(0xFFEF5350))),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '⚠️  Waste is logged immediately. No approval needed. Stock will be deducted.',
+                style: TextStyle(color: Colors.orange, fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white54))),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF5350)),
+            child: const Text('Log Waste'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final qty = double.tryParse(qtyCtrl.text.trim());
+    if (qty == null || qty <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Enter a valid positive quantity'),
+        backgroundColor: Colors.red,
+      ));
+      return;
+    }
+    try {
+      await ApiService.instance.logWaste(
+        inventoryItemId:   _picked!.id,
+        quantity:          qty,
+        loggedBy:          widget.staff.name,
+        notes:             notesCtrl.text.trim().isEmpty ? null : notesCtrl.text.trim(),
+        requesterLocation: widget.staff.locationName,
+      );
+      HapticFeedback.heavyImpact();
+      if (!mounted) return;
+      setState(() { _picked = null; _qty = 1.0; });
+      _loadData();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('🗑️  Waste logged: $qty ${_picked?.unitOfMeasure ?? ''}'),
+        backgroundColor: Colors.red.shade700,
+      ));
+    } on ApiException catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e.message),
+        backgroundColor: Colors.red,
+      ));
+    }
+  }
+
   Future<void> _submit() async {
     if (_picked == null) return;
     setState(() {
@@ -141,7 +250,7 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            _Header(staff: widget.staff),
+            _Header(staff: widget.staff, onLogWaste: _logWaste),
             Expanded(
               child: _loadingItems
                   ? const Center(
@@ -158,11 +267,13 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
                           submitError: _submitError,
                           myRequests:  _myRequests,
                           loadingReqs: _loadingRequests,
+                          search:      _search,
                           onSelect:    _selectItem,
                           onAdjustQty: _adjustQty,
                           onPurpose:   (p) => setState(() => _purpose = p),
                           onSubmit:    _submit,
                           onRefreshReqs: _loadMyRequests,
+                          onSearch:    (v) => setState(() => _search = v),
                         ),
             ),
           ],
@@ -178,7 +289,8 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
 
 class _Header extends StatelessWidget {
   final Staff staff;
-  const _Header({required this.staff});
+  final VoidCallback onLogWaste;
+  const _Header({required this.staff, required this.onLogWaste});
 
   @override
   Widget build(BuildContext context) {
@@ -198,6 +310,19 @@ class _Header extends StatelessWidget {
                 letterSpacing: 2,
               )),
           const Spacer(),
+          // Log Waste button
+          OutlinedButton.icon(
+            onPressed: onLogWaste,
+            icon: const Icon(Icons.delete_rounded, size: 16,
+                color: Color(0xFFEF9A9A)),
+            label: const Text('Log Waste',
+                style: TextStyle(color: Color(0xFFEF9A9A), fontSize: 13)),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Color(0xFFEF5350)),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            ),
+          ),
+          const SizedBox(width: 12),
           // Staff badge
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -248,11 +373,13 @@ class _Body extends StatelessWidget {
   final String? submitError;
   final List<Requisition> myRequests;
   final bool loadingReqs;
+  final String search;
   final void Function(InventoryItem) onSelect;
   final void Function(double) onAdjustQty;
   final void Function(String) onPurpose;
   final VoidCallback onSubmit;
   final VoidCallback onRefreshReqs;
+  final void Function(String) onSearch;
 
   const _Body({
     required this.items,
@@ -264,11 +391,13 @@ class _Body extends StatelessWidget {
     required this.submitError,
     required this.myRequests,
     required this.loadingReqs,
+    required this.search,
     required this.onSelect,
     required this.onAdjustQty,
     required this.onPurpose,
     required this.onSubmit,
     required this.onRefreshReqs,
+    required this.onSearch,
   });
 
   @override
@@ -287,10 +416,12 @@ class _Body extends StatelessWidget {
             notesCtrl:   notesCtrl,
             submitting:  submitting,
             submitError: submitError,
+            search:      search,
             onSelect:    onSelect,
             onAdjustQty: onAdjustQty,
             onPurpose:   onPurpose,
             onSubmit:    onSubmit,
+            onSearch:    onSearch,
           ),
         ),
         // ── RIGHT: My Requests Today ─────────────────────────
@@ -319,9 +450,11 @@ class _RequestForm extends StatelessWidget {
   final TextEditingController notesCtrl;
   final bool submitting;
   final String? submitError;
+  final String search;
   final void Function(InventoryItem) onSelect;
   final void Function(double) onAdjustQty;
   final void Function(String) onPurpose;
+  final void Function(String) onSearch;
   final VoidCallback onSubmit;
 
   const _RequestForm({
@@ -332,14 +465,22 @@ class _RequestForm extends StatelessWidget {
     required this.notesCtrl,
     required this.submitting,
     required this.submitError,
+    required this.search,
     required this.onSelect,
     required this.onAdjustQty,
     required this.onPurpose,
+    required this.onSearch,
     required this.onSubmit,
   });
 
   @override
   Widget build(BuildContext context) {
+    final filteredItems = search.isEmpty
+        ? items
+        : items
+            .where((i) => i.name.toLowerCase().contains(search.toLowerCase()))
+            .toList();
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -347,8 +488,31 @@ class _RequestForm extends StatelessWidget {
         children: [
           // ── Section 1: Item Picker ─────────────────────────
           const _SectionLabel(label: '1  WHAT DO YOU NEED?'),
+          const SizedBox(height: 10),
+          TextField(
+            onChanged: onSearch,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'Search items…',
+              hintStyle: TextStyle(color: Colors.white.withOpacity(0.35)),
+              filled: true,
+              fillColor: const Color(0xFF1E2D3D),
+              prefixIcon: const Icon(Icons.search_rounded, color: AppTheme.pinMuted, size: 20),
+              suffixIcon: search.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear_rounded, color: AppTheme.pinMuted, size: 18),
+                      onPressed: () => onSearch(''),
+                    )
+                  : null,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
           const SizedBox(height: 12),
-          _ItemGrid(items: items, picked: picked, onSelect: onSelect),
+          _ItemGrid(items: filteredItems, picked: picked, onSelect: onSelect),
           const SizedBox(height: 24),
 
           if (picked != null) ...[

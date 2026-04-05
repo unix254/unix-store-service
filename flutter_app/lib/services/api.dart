@@ -232,6 +232,94 @@ class ApiService {
     return (data as List).cast<Map<String, dynamic>>();
   }
 
+  // ── Inventory (M6 additions) ────────────────────────────────
+
+  Future<List<Map<String, dynamic>>> getDraftPO() async {
+    final data = await _get('/api/inventory/draft-po');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<void> logWaste({
+    required String inventoryItemId,
+    required double quantity,
+    required String loggedBy,
+    String? notes,
+    String? requesterLocation,
+  }) async {
+    await _post('/api/inventory/waste', {
+      'inventory_item_id':   inventoryItemId,
+      'quantity':            quantity,
+      'logged_by':           loggedBy,
+      if (notes != null && notes.isNotEmpty) 'notes': notes,
+      if (requesterLocation != null) 'requester_location': requesterLocation,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getInflationSummary() async {
+    final data = await _get('/api/inventory/inflation-summary');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<List<Map<String, dynamic>>> getCostHistory(String itemId) async {
+    final data = await _get('/api/inventory/cost-history/$itemId');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  // ── Pay Runs ────────────────────────────────────────────────
+
+  Future<List<Map<String, dynamic>>> getPayRuns() async {
+    final data = await _get('/api/pay-runs');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> getTodayPayRun() async {
+    final data = await _get('/api/pay-runs/today');
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getPayRun(String id) async {
+    final data = await _get('/api/pay-runs/$id');
+    return data as Map<String, dynamic>;
+  }
+
+  Future<int> autoPopulatePayRun(String id) async {
+    final data = await _post('/api/pay-runs/$id/auto-populate', {});
+    return (data['added'] as num).toInt();
+  }
+
+  Future<void> addPayRunDetail(String runId, Map<String, dynamic> body) async {
+    await _post('/api/pay-runs/$runId/details', body);
+  }
+
+  Future<void> updatePayRunDetail(String runId, String detailId, Map<String, dynamic> body) async {
+    await _put('/api/pay-runs/$runId/details/$detailId', body);
+  }
+
+  Future<void> removePayRunDetail(String runId, String detailId) async {
+    await _delete('/api/pay-runs/$runId/details/$detailId');
+  }
+
+  Future<void> submitPayRun(String id, String createdBy) async {
+    await _patch('/api/pay-runs/$id/submit', {'created_by': createdBy});
+  }
+
+  Future<void> approvePayRun(String id) async {
+    await _patch('/api/pay-runs/$id/approve', {});
+  }
+
+  Future<Map<String, dynamic>> disbursePayRun(String id, String disbursedBy) async {
+    final data = await _patch('/api/pay-runs/$id/disburse', {'disbursed_by': disbursedBy});
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getPayRunWhatsApp(String id, {String? phone}) async {
+    final path = phone != null
+        ? '/api/pay-runs/$id/whatsapp?phone=${Uri.encodeComponent(phone)}'
+        : '/api/pay-runs/$id/whatsapp';
+    final data = await _get(path);
+    return data as Map<String, dynamic>;
+  }
+
   // ── Yield Config ────────────────────────────────────────────
 
   Future<List<YieldConfig>> getYieldConfigs() async {

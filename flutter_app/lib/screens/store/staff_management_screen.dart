@@ -3,6 +3,8 @@ import '../../config/theme.dart';
 import '../../models/staff_member.dart';
 import '../../services/api.dart';
 
+const _kLocations = ['Kitchen', 'Rooftop', 'Barista', 'Main Hall', 'Prep Room', 'Office'];
+
 /// Manager-only screen for adding, editing, and deactivating staff PINs.
 class StaffManagementScreen extends StatefulWidget {
   const StaffManagementScreen({super.key});
@@ -301,19 +303,65 @@ class _StaffCard extends StatelessWidget {
                         ),
                     ],
                   ),
-                  const SizedBox(height: 3),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: roleColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(member.roleLabel,
-                        style: TextStyle(
-                            fontSize: 11,
-                            color: roleColor,
-                            fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      // Role badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: roleColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(member.roleLabel,
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: roleColor,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                      // Location badge
+                      if (member.locationName != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.blueGrey.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.location_on_rounded,
+                                  size: 10, color: Colors.blueGrey),
+                              const SizedBox(width: 3),
+                              Text(member.locationName!,
+                                  style: const TextStyle(
+                                      fontSize: 11, color: Colors.blueGrey)),
+                            ],
+                          ),
+                        ),
+                      // Capability count badge
+                      if (member.capabilities.isNotEmpty)
+                        Tooltip(
+                          message: member.capabilities
+                              .map((c) => kAllCapabilities
+                                  .firstWhere((k) => k.$1 == c,
+                                      orElse: () => (c, c))
+                                  .$2)
+                              .join('\n'),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppTheme.pinTeal.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text('${member.capabilities.length} capabilities',
+                                style: const TextStyle(
+                                    fontSize: 11, color: AppTheme.pinTeal)),
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -384,17 +432,31 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
   late final TextEditingController _pin;
   late final TextEditingController _pinConfirm;
   String _role = 'kitchen';
+  String? _locationName;
+  late List<String> _capabilities;
   bool _showPin = false;
+  bool _showCapabilities = false;
 
   bool get _isEdit => widget.existing != null;
 
   @override
   void initState() {
     super.initState();
-    _name       = TextEditingController(text: widget.existing?.name ?? '');
-    _pin        = TextEditingController();
-    _pinConfirm = TextEditingController();
-    _role       = widget.existing?.role ?? 'kitchen';
+    _name         = TextEditingController(text: widget.existing?.name ?? '');
+    _pin          = TextEditingController();
+    _pinConfirm   = TextEditingController();
+    _role         = widget.existing?.role ?? 'kitchen';
+    _locationName = widget.existing?.locationName;
+    _capabilities = widget.existing?.capabilities.toList()
+        ?? defaultCapabilities('kitchen');
+  }
+
+  void _onRoleChanged(String role) {
+    setState(() {
+      _role = role;
+      // Seed default capabilities when role changes (only if not editing)
+      if (!_isEdit) _capabilities = defaultCapabilities(role);
+    });
   }
 
   @override
@@ -408,8 +470,10 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
     final body = <String, dynamic>{
-      'name': _name.text.trim(),
-      'role': _role,
+      'name':          _name.text.trim(),
+      'role':          _role,
+      'capabilities':  _capabilities,
+      'location_name': _locationName,
     };
     if (_pin.text.isNotEmpty) body['pin'] = _pin.text;
     if (!_isEdit) body['pin'] = _pin.text; // required for create
@@ -460,7 +524,7 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
                           label: Text(label,
                               style: const TextStyle(fontSize: 12)),
                           selected: _role == r,
-                          onSelected: (_) => setState(() => _role = r),
+                          onSelected: (_) => _onRoleChanged(r),
                           selectedColor: AppTheme.pinTeal.withOpacity(0.2),
                         ),
                       ),
@@ -514,6 +578,70 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
                   return null;
                 },
               ),
+              const SizedBox(height: 16),
+
+              // Location
+              DropdownButtonFormField<String?>(
+                value: _locationName,
+                decoration: const InputDecoration(
+                  labelText: 'Location (optional)',
+                  prefixIcon: Icon(Icons.location_on_rounded),
+                ),
+                items: [
+                  const DropdownMenuItem<String?>(
+                      value: null, child: Text('Not assigned')),
+                  ..._kLocations.map((l) =>
+                      DropdownMenuItem<String?>(value: l, child: Text(l))),
+                ],
+                onChanged: (v) => setState(() => _locationName = v),
+              ),
+              const SizedBox(height: 16),
+
+              // Capabilities
+              GestureDetector(
+                onTap: () => setState(() => _showCapabilities = !_showCapabilities),
+                child: Row(
+                  children: [
+                    const Text('Capabilities',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.pinMuted,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(width: 6),
+                    Text('(${_capabilities.length} selected)',
+                        style: const TextStyle(
+                            fontSize: 11, color: AppTheme.pinTeal)),
+                    const Spacer(),
+                    Icon(
+                      _showCapabilities
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                      size: 18,
+                      color: AppTheme.pinMuted,
+                    ),
+                  ],
+                ),
+              ),
+              if (_showCapabilities) ...[
+                const SizedBox(height: 8),
+                ...kAllCapabilities.map((cap) {
+                  final (key, label) = cap;
+                  return CheckboxListTile(
+                    dense: true,
+                    value: _capabilities.contains(key),
+                    title: Text(label, style: const TextStyle(fontSize: 13)),
+                    activeColor: AppTheme.pinTeal,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (v) => setState(() {
+                      if (v == true) {
+                        _capabilities = [..._capabilities, key];
+                      } else {
+                        _capabilities = _capabilities.where((c) => c != key).toList();
+                      }
+                    }),
+                  );
+                }),
+              ],
             ],
           ),
         ),

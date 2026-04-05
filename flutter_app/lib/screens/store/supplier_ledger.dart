@@ -100,7 +100,7 @@ class _SupplierLedgerScreenState extends State<SupplierLedgerScreen> {
 // LEFT PANEL: Supplier List
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _SupplierList extends StatelessWidget {
+class _SupplierList extends StatefulWidget {
   final List<Supplier> suppliers;
   final Supplier? selected;
   final bool loading;
@@ -118,7 +118,22 @@ class _SupplierList extends StatelessWidget {
   });
 
   @override
+  State<_SupplierList> createState() => _SupplierListState();
+}
+
+class _SupplierListState extends State<_SupplierList> {
+  String _search = '';
+
+  @override
   Widget build(BuildContext context) {
+    final filtered = _search.isEmpty
+        ? widget.suppliers
+        : widget.suppliers
+            .where((s) =>
+                s.name.toLowerCase().contains(_search.toLowerCase()) ||
+                (s.location ?? '').toLowerCase().contains(_search.toLowerCase()))
+            .toList();
+
     return SizedBox(
       width: 300,
       child: Scaffold(
@@ -128,61 +143,96 @@ class _SupplierList extends StatelessWidget {
           actions: [
             IconButton(
                 icon: const Icon(Icons.refresh_rounded),
-                onPressed: onRefresh,
+                onPressed: widget.onRefresh,
                 tooltip: 'Refresh'),
           ],
         ),
         floatingActionButton: FloatingActionButton.extended(
-          onPressed: onAdd,
+          onPressed: widget.onAdd,
           backgroundColor: AppTheme.primary,
           icon: const Icon(Icons.add, color: Colors.white),
           label: const Text('Add Supplier',
               style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
         ),
         floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-        body: loading
-            ? const Center(child: CircularProgressIndicator())
-            : suppliers.isEmpty
-                ? const Center(
-                    child: Text('No suppliers yet.\nTap + to add one.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.grey)))
-                : ListView.separated(
-                    padding: const EdgeInsets.only(bottom: 80),
-                    itemCount: suppliers.length,
-                    separatorBuilder: (_, __) =>
-                        const Divider(height: 1, indent: 16),
-                    itemBuilder: (_, i) {
-                      final s = suppliers[i];
-                      final isSelected = selected?.id == s.id;
-                      return ListTile(
-                        selected: isSelected,
-                        selectedTileColor:
-                            AppTheme.primary.withOpacity(0.08),
-                        onTap: () => onSelect(s),
-                        leading: CircleAvatar(
-                          backgroundColor: isSelected
-                              ? AppTheme.primary
-                              : AppTheme.scaffold,
+        body: Column(
+          children: [
+            // ── Search bar ───────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 10, 10, 4),
+              child: TextField(
+                onChanged: (v) => setState(() => _search = v),
+                decoration: InputDecoration(
+                  hintText: 'Search suppliers…',
+                  hintStyle: const TextStyle(fontSize: 13),
+                  isDense: true,
+                  prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                  suffixIcon: _search.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear_rounded, size: 16),
+                          onPressed: () => setState(() => _search = ''),
+                        )
+                      : null,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 8),
+                ),
+              ),
+            ),
+            // ── List ─────────────────────────────────────────
+            Expanded(
+              child: widget.loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : filtered.isEmpty
+                      ? Center(
                           child: Text(
-                            s.name.substring(0, 1).toUpperCase(),
-                            style: TextStyle(
-                              color: isSelected
-                                  ? Colors.white
-                                  : AppTheme.primary,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
+                            _search.isNotEmpty
+                                ? 'No matches for "$_search"'
+                                : 'No suppliers yet.\nTap + to add one.',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.grey),
+                          ))
+                      : ListView.separated(
+                          padding: const EdgeInsets.only(bottom: 80),
+                          itemCount: filtered.length,
+                          separatorBuilder: (_, __) =>
+                              const Divider(height: 1, indent: 16),
+                          itemBuilder: (_, i) {
+                            final s = filtered[i];
+                            final isSelected = widget.selected?.id == s.id;
+                            return ListTile(
+                              selected: isSelected,
+                              selectedTileColor:
+                                  AppTheme.primary.withOpacity(0.08),
+                              onTap: () => widget.onSelect(s),
+                              leading: CircleAvatar(
+                                backgroundColor: isSelected
+                                    ? AppTheme.primary
+                                    : AppTheme.scaffold,
+                                child: Text(
+                                  s.name.substring(0, 1).toUpperCase(),
+                                  style: TextStyle(
+                                    color: isSelected
+                                        ? Colors.white
+                                        : AppTheme.primary,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              title: Text(s.name,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14)),
+                              subtitle: Text(s.location ?? 'No location',
+                                  style: const TextStyle(fontSize: 12)),
+                              trailing: _BalanceChip(amount: s.balanceDue),
+                            );
+                          },
                         ),
-                        title: Text(s.name,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600, fontSize: 14)),
-                        subtitle: Text(s.location ?? 'No location',
-                            style: const TextStyle(fontSize: 12)),
-                        trailing: _BalanceChip(amount: s.balanceDue),
-                      );
-                    },
-                  ),
+            ),
+          ],
+        ),
       ),
     );
   }

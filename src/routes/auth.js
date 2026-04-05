@@ -5,7 +5,7 @@ const router = express.Router();
 
 // POST /api/auth/pin
 // Body: { pin: "1234" }
-// Returns: { id, name, role } on success | 401 on failure
+// Returns: { id, name, role, capabilities, location_name } on success | 401 on failure
 router.post('/pin', async (req, res) => {
   const { pin } = req.body;
   if (!pin || !/^\d{4}$/.test(pin)) {
@@ -13,13 +13,19 @@ router.post('/pin', async (req, res) => {
   }
   try {
     const rows = await query(
-      'SELECT id, name, role FROM unix_staff WHERE pin = ? AND active = 1',
+      'SELECT id, name, role, capabilities, location_name FROM unix_staff WHERE pin = ? AND active = 1',
       [pin]
     );
     if (!rows.length) {
       return res.status(401).json({ error: 'Incorrect PIN' });
     }
-    res.json(rows[0]);
+    const staff = rows[0];
+    // Parse JSON capabilities if stored as string
+    if (typeof staff.capabilities === 'string') {
+      try { staff.capabilities = JSON.parse(staff.capabilities); } catch (_) { staff.capabilities = []; }
+    }
+    staff.capabilities = staff.capabilities || [];
+    res.json(staff);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -30,8 +36,15 @@ router.post('/pin', async (req, res) => {
 router.get('/staff', async (req, res) => {
   try {
     const rows = await query(
-      'SELECT id, name, role, active, created_at FROM unix_staff ORDER BY role, name'
+      'SELECT id, name, role, active, capabilities, location_name, created_at FROM unix_staff ORDER BY role, name'
     );
+    // Parse JSON capabilities for each row
+    rows.forEach(r => {
+      if (typeof r.capabilities === 'string') {
+        try { r.capabilities = JSON.parse(r.capabilities); } catch (_) { r.capabilities = []; }
+      }
+      r.capabilities = r.capabilities || [];
+    });
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -40,7 +53,7 @@ router.get('/staff', async (req, res) => {
 
 // POST /api/auth/staff  – create a new staff member
 router.post('/staff', async (req, res) => {
-  const { name, pin, role } = req.body;
+  const { name, pin, role, capabilities, location_name } = req.body;
   if (!name || !pin || !role) {
     return res.status(400).json({ error: 'name, pin and role are required' });
   }
@@ -57,9 +70,10 @@ router.post('/staff', async (req, res) => {
       return res.status(409).json({ error: 'That PIN is already in use by another staff member' });
     }
     const id = uuidv4();
+    const caps = capabilities ? JSON.stringify(capabilities) : null;
     await query(
-      'INSERT INTO unix_staff (id, name, pin, role, active) VALUES (?, ?, ?, ?, 1)',
-      [id, name, pin, role]
+      'INSERT INTO unix_staff (id, name, pin, role, active, capabilities, location_name) VALUES (?, ?, ?, ?, 1, ?, ?)',
+      [id, name, pin, role, caps, location_name || null]
     );
     res.status(201).json({ id });
   } catch (err) {
@@ -68,9 +82,9 @@ router.post('/staff', async (req, res) => {
   }
 });
 
-// PUT /api/auth/staff/:id  – update name, pin (optional), role
+// PUT /api/auth/staff/:id  – update name, pin (optional), role, capabilities, location_name
 router.put('/staff/:id', async (req, res) => {
-  const { name, pin, role } = req.body;
+  const { name, pin, role, capabilities, location_name } = req.body;
   if (!name || !role) {
     return res.status(400).json({ error: 'name and role are required' });
   }
@@ -89,14 +103,17 @@ router.put('/staff/:id', async (req, res) => {
       if (conflict.length) {
         return res.status(409).json({ error: 'That PIN is already in use by another staff member' });
       }
+    }
+    const caps = capabilities ? JSON.stringify(capabilities) : null;
+    if (pin) {
       await query(
-        'UPDATE unix_staff SET name = ?, pin = ?, role = ? WHERE id = ?',
-        [name, pin, role, req.params.id]
+        'UPDATE unix_staff SET name = ?, pin = ?, role = ?, capabilities = ?, location_name = ? WHERE id = ?',
+        [name, pin, role, caps, location_name || null, req.params.id]
       );
     } else {
       await query(
-        'UPDATE unix_staff SET name = ?, role = ? WHERE id = ?',
-        [name, role, req.params.id]
+        'UPDATE unix_staff SET name = ?, role = ?, capabilities = ?, location_name = ? WHERE id = ?',
+        [name, role, caps, location_name || null, req.params.id]
       );
     }
     res.json({ ok: true });

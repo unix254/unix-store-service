@@ -566,19 +566,63 @@ class _YieldFormDialogState extends State<_YieldFormDialog> {
                         ? 'Required' : null,
                   )
                 else
-                  DropdownButtonFormField<String>(
-                    value: _selectedProductId,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Select POS product',
-                      prefixIcon: Icon(Icons.restaurant_menu_rounded),
+                  // Autocomplete for large POS product lists
+                  Autocomplete<PosProduct>(
+                    initialValue: TextEditingValue(
+                      text: _pickedProduct?.displayLabel ?? '',
                     ),
-                    items: widget.products.map((p) => DropdownMenuItem(
-                      value: p.id,
-                      child: Text(p.displayLabel, overflow: TextOverflow.ellipsis),
-                    )).toList(),
-                    onChanged: (v) => setState(() => _selectedProductId = v),
-                    validator: (v) => v == null ? 'Required' : null,
+                    optionsBuilder: (TextEditingValue tv) {
+                      if (tv.text.isEmpty) return widget.products;
+                      final q = tv.text.toLowerCase();
+                      return widget.products.where(
+                          (p) => p.displayLabel.toLowerCase().contains(q));
+                    },
+                    displayStringForOption: (p) => p.displayLabel,
+                    onSelected: (p) =>
+                        setState(() => _selectedProductId = p.id),
+                    fieldViewBuilder: (ctx, ctrl, focusNode, onFieldSubmitted) {
+                      return TextFormField(
+                        controller: ctrl,
+                        focusNode: focusNode,
+                        decoration: const InputDecoration(
+                          labelText: 'Search POS product…',
+                          prefixIcon: Icon(Icons.restaurant_menu_rounded),
+                          hintText: 'Type to filter',
+                        ),
+                        validator: (_) =>
+                            _selectedProductId == null ? 'Required' : null,
+                      );
+                    },
+                    optionsViewBuilder: (ctx, onSelected, options) {
+                      return Align(
+                        alignment: Alignment.topLeft,
+                        child: Material(
+                          elevation: 4,
+                          borderRadius: BorderRadius.circular(8),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(
+                                maxHeight: 220, maxWidth: 460),
+                            child: ListView.builder(
+                              padding: EdgeInsets.zero,
+                              shrinkWrap: true,
+                              itemCount: options.length,
+                              itemBuilder: (_, i) {
+                                final p = options.elementAt(i);
+                                return ListTile(
+                                  dense: true,
+                                  leading: const Icon(
+                                      Icons.restaurant_menu_rounded,
+                                      size: 16),
+                                  title: Text(p.displayLabel,
+                                      style: const TextStyle(fontSize: 13)),
+                                  onTap: () => onSelected(p),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 const SizedBox(height: 16),
 

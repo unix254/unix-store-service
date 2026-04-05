@@ -10,6 +10,7 @@ const suppliersRouter    = require('./routes/suppliers');
 const requisitionsRouter = require('./routes/requisitions');
 const yieldRouter        = require('./routes/yield');
 const posRouter          = require('./routes/pos');
+const payRunsRouter      = require('./routes/pay_runs');
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.use('/api/suppliers',    suppliersRouter);
 app.use('/api/requisitions', requisitionsRouter);
 app.use('/api/yield',        yieldRouter);
 app.use('/api/pos',          posRouter);
+app.use('/api/pay-runs',     payRunsRouter);
 
 // Health check
 app.get('/health', (req, res) => {
