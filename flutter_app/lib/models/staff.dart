@@ -29,18 +29,19 @@ class Staff {
   }
 
   /// Role shortcuts (keep for backward compat)
-  bool get isStore   => role == 'store' || role == 'manager';
+  bool get isStore   => role == 'store' || role == 'manager' || role == 'owner';
   bool get isKitchen => role == 'kitchen';
   bool get isManager => role == 'manager';
+  bool get isOwner   => role == 'owner';
 
   /// Capability-based gating (use for new M6+ features)
   bool hasCapability(String cap) => capabilities.contains(cap);
 
-  bool get canApproveRequisitions => hasCapability('can_approve_requisitions') || isManager;
-  bool get canManageInventory     => hasCapability('can_manage_inventory')     || isManager;
-  bool get canDraftPO             => hasCapability('can_draft_po')             || isManager;
-  bool get canApprovePayRun       => hasCapability('can_approve_payrun')       || isManager;
+  bool get canApproveRequisitions => hasCapability('can_approve_requisitions') || isManager || isOwner;
+  bool get canManageInventory     => hasCapability('can_manage_inventory')     || isManager || isOwner;
+  bool get canDraftPO             => hasCapability('can_draft_po')             || isManager || isOwner;
+  bool get canApprovePayRun       => hasCapability('can_approve_payrun')       || isManager || isOwner;
   bool get canLogWaste            => hasCapability('can_log_waste')            || true; // all can log waste
-  bool get canManageStaff         => hasCapability('can_manage_staff')         || isManager;
-  bool get canViewVariance        => hasCapability('can_view_variance')        || isManager;
+  bool get canManageStaff         => hasCapability('can_manage_staff')         || isManager || isOwner;
+  bool get canViewVariance        => hasCapability('can_view_variance')        || isManager || isOwner;
 }

@@ -62,8 +62,8 @@ class _VarianceScreenState extends State<VarianceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final overIssued  = _rows.where((r) => _v(r, 'variance') > 0.05).length;
-    final underIssued = _rows.where((r) => _v(r, 'variance') < -0.05).length;
+    final overIssued  = _rows.where((r) => _v(r, 'variance_qty') > 0.05).length;
+    final underIssued = _rows.where((r) => _v(r, 'variance_qty') < -0.05).length;
     final onTrack     = _rows.length - overIssued - underIssued;
 
     return Column(
@@ -330,7 +330,7 @@ class _VarianceTable extends StatelessWidget {
                 ...rows.asMap().entries.map((entry) {
                   final i = entry.key;
                   final r = entry.value;
-                  final variance = vFn(r, 'variance');
+                  final variance = vFn(r, 'variance_qty');
                   final isOver  = variance > 0.05;
                   final isUnder = variance < -0.05;
 

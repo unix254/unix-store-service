@@ -37,6 +37,7 @@ class StaffMember {
   }
 
   String get roleLabel => switch (role) {
+        'owner'   => 'Owner',
         'manager' => 'Manager',
         'store'   => 'Store Keeper',
         'kitchen' => 'Kitchen Staff',
@@ -64,5 +65,6 @@ List<String> defaultCapabilities(String role) => switch (role) {
       'store'   => ['can_approve_requisitions', 'can_manage_inventory', 'can_draft_po', 'can_view_variance'],
       'manager' => ['can_approve_requisitions', 'can_manage_inventory', 'can_draft_po',
                     'can_approve_payrun', 'can_log_waste', 'can_manage_staff', 'can_view_variance'],
+      'owner'   => kAllCapabilities.map((e) => e.$1).toList(),
       _         => [],
     };

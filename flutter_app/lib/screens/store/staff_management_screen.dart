@@ -132,9 +132,9 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Group by role order: manager → store → kitchen
+    // Group by role order: owner → manager → store → kitchen
     final sorted = [..._staff]..sort((a, b) {
-      const order = {'manager': 0, 'store': 1, 'kitchen': 2};
+      const order = {'owner': 0, 'manager': 1, 'store': 2, 'kitchen': 3};
       final cmp = (order[a.role] ?? 9).compareTo(order[b.role] ?? 9);
       return cmp != 0 ? cmp : a.name.compareTo(b.name);
     });
@@ -236,6 +236,7 @@ class _StaffCard extends StatelessWidget {
   });
 
   static const _roleColors = {
+    'owner':   Color(0xFF1565C0),
     'manager': Color(0xFF7B1FA2),
     'store':   AppTheme.pinTeal,
     'kitchen': Color(0xFFF57C00),
@@ -516,6 +517,7 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
                     ('kitchen', '🍳 Kitchen'),
                     ('store',   '📦 Store'),
                     ('manager','👔 Manager'),
+                    ('owner',  '👑 Owner'),
                   ])
                     Expanded(
                       child: Padding(

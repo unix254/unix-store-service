@@ -58,32 +58,88 @@ class _SupplierLedgerScreenState extends State<SupplierLedgerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        // ── Left: Supplier List ──────────────────────────────
-        _SupplierList(
-          suppliers: _suppliers,
-          selected: _selected,
-          loading: _loadingSuppliers,
-          onSelect: (s) => setState(() => _selected = s),
-          onAdd: _showAddSupplierDialog,
-          onRefresh: _loadSuppliers,
-        ),
-        const VerticalDivider(width: 1, thickness: 1),
-        // ── Right: Detail Panel ──────────────────────────────
-        Expanded(
-          child: _selected == null
-              ? const _EmptyDetail()
-              : _SupplierDetail(
-                  key: ValueKey(_selected!.id),
-                  supplier: _selected!,
-                  staff: widget.staff,
-                  onUpdated: _loadSuppliers,
-                  onError: _showError,
-                  onSuccess: _showSuccess,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 800;
+
+        // Mobile View
+        if (isMobile) {
+          if (_selected == null) {
+            return SizedBox(
+              width: double.infinity,
+              child: _SupplierList(
+                suppliers: _suppliers,
+                selected: _selected,
+                loading: _loadingSuppliers,
+                onSelect: (s) => setState(() => _selected = s),
+                onAdd: _showAddSupplierDialog,
+                onRefresh: _loadSuppliers,
+              ),
+            );
+          } else {
+            return Column(
+              children: [
+                Container(
+                  color: AppTheme.surface,
+                  padding: const EdgeInsets.only(top: 8, bottom: 8, left: 8),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back_rounded),
+                        onPressed: () => setState(() => _selected = null),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('Back to Suppliers', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+                    ],
+                  ),
                 ),
-        ),
-      ],
+                Expanded(
+                  child: _SupplierDetail(
+                    key: ValueKey(_selected!.id),
+                    supplier: _selected!,
+                    staff: widget.staff,
+                    onUpdated: _loadSuppliers,
+                    onError: _showError,
+                    onSuccess: _showSuccess,
+                  ),
+                ),
+              ],
+            );
+          }
+        }
+
+        // Desktop View
+        return Row(
+          children: [
+            // ── Left: Supplier List ──────────────────────────────
+            SizedBox(
+              width: 300,
+              child: _SupplierList(
+                suppliers: _suppliers,
+                selected: _selected,
+                loading: _loadingSuppliers,
+                onSelect: (s) => setState(() => _selected = s),
+                onAdd: _showAddSupplierDialog,
+                onRefresh: _loadSuppliers,
+              ),
+            ),
+            const VerticalDivider(width: 1, thickness: 1),
+            // ── Right: Detail Panel ──────────────────────────────
+            Expanded(
+              child: _selected == null
+                  ? const _EmptyDetail()
+                  : _SupplierDetail(
+                      key: ValueKey(_selected!.id),
+                      supplier: _selected!,
+                      staff: widget.staff,
+                      onUpdated: _loadSuppliers,
+                      onError: _showError,
+                      onSuccess: _showSuccess,
+                    ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -134,9 +190,7 @@ class _SupplierListState extends State<_SupplierList> {
                 (s.location ?? '').toLowerCase().contains(_search.toLowerCase()))
             .toList();
 
-    return SizedBox(
-      width: 300,
-      child: Scaffold(
+    return Scaffold(
         backgroundColor: AppTheme.surface,
         appBar: AppBar(
           title: const Text('Suppliers'),
@@ -233,7 +287,6 @@ class _SupplierListState extends State<_SupplierList> {
             ),
           ],
         ),
-      ),
     );
   }
 }

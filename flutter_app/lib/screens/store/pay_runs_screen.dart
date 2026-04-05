@@ -288,36 +288,93 @@ class _PayRunsScreenState extends State<PayRunsScreen> {
       );
     }
 
-    return Row(
-      children: [
-        // ── Left: Run history list ─────────────────────────────
-        _RunListPanel(
-          runs: _allRuns,
-          selectedId: _selectedRun?['id'] as String?,
-          onSelect: _openRun,
-          onRefresh: _load,
-        ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 800;
 
-        // ── Right: Detail panel ────────────────────────────────
-        Expanded(
-          child: _selectedRun == null
-              ? const Center(child: Text('Select a pay run',
-                  style: TextStyle(color: AppTheme.pinMuted)))
-              : _RunDetailPanel(
-                  run: _selectedRun!,
-                  staff: widget.staff,
-                  onAutoPopulate: _autoPopulate,
-                  onEditAmount: _editAmount,
-                  onTogglePostpone: _togglePostpone,
-                  onRemove: _removeDetail,
-                  onSubmit: _submit,
-                  onSendWhatsApp: _sendWhatsApp,
-                  onApprove: _approve,
-                  onDisburse: _disburse,
-                  onRefresh: () => _openRun(_selectedRun!['id'] as String),
+        if (isMobile) {
+          if (_selectedRun == null) {
+            return SizedBox(
+              width: double.infinity,
+              child: _RunListPanel(
+                runs: _allRuns,
+                selectedId: null,
+                onSelect: _openRun,
+                onRefresh: _load,
+              ),
+            );
+          } else {
+            return Column(
+              children: [
+                Container(
+                  color: AppTheme.surface,
+                  padding: const EdgeInsets.only(top: 8, bottom: 8, left: 8),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back_rounded),
+                        onPressed: () => setState(() => _selectedRun = null),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('Back to Pay Runs', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+                    ],
+                  ),
                 ),
-        ),
-      ],
+                Expanded(
+                  child: _RunDetailPanel(
+                    run: _selectedRun!,
+                    staff: widget.staff,
+                    onAutoPopulate: _autoPopulate,
+                    onEditAmount: _editAmount,
+                    onTogglePostpone: _togglePostpone,
+                    onRemove: _removeDetail,
+                    onSubmit: _submit,
+                    onSendWhatsApp: _sendWhatsApp,
+                    onApprove: _approve,
+                    onDisburse: _disburse,
+                    onRefresh: () => _openRun(_selectedRun!['id'] as String),
+                  ),
+                ),
+              ],
+            );
+          }
+        }
+
+        return Row(
+          children: [
+            // ── Left: Run history list ─────────────────────────────
+            SizedBox(
+              width: 260,
+              child: _RunListPanel(
+                runs: _allRuns,
+                selectedId: _selectedRun?['id'] as String?,
+                onSelect: _openRun,
+                onRefresh: _load,
+              ),
+            ),
+
+            // ── Right: Detail panel ────────────────────────────────
+            Expanded(
+              child: _selectedRun == null
+                  ? const Center(child: Text('Select a pay run',
+                      style: TextStyle(color: AppTheme.pinMuted)))
+                  : _RunDetailPanel(
+                      run: _selectedRun!,
+                      staff: widget.staff,
+                      onAutoPopulate: _autoPopulate,
+                      onEditAmount: _editAmount,
+                      onTogglePostpone: _togglePostpone,
+                      onRemove: _removeDetail,
+                      onSubmit: _submit,
+                      onSendWhatsApp: _sendWhatsApp,
+                      onApprove: _approve,
+                      onDisburse: _disburse,
+                      onRefresh: () => _openRun(_selectedRun!['id'] as String),
+                    ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -340,7 +397,6 @@ class _RunListPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 260,
       color: AppTheme.sidebar,
       child: Column(
         children: [

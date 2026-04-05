@@ -128,7 +128,7 @@ router.get('/variance/today', async (req, res) => {
           COALESCE(issued.total_issued, 0)
           - SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit),
           3
-        )                                   AS variance
+        )                                   AS variance_qty
       FROM unix_yield_config yc
       JOIN unix_store_inventory i  ON i.id  = yc.inventory_item_id
       LEFT JOIN products p         ON p.id  = yc.unicenta_product_id
@@ -158,7 +158,7 @@ router.get('/variance/today', async (req, res) => {
       ) issued ON issued.inventory_item_id = yc.inventory_item_id
       -- GROUP BY inventory item to collapse multiple POS-product mappings
       GROUP BY i.id, i.name, i.unit_of_measure, issued.total_issued
-      ORDER BY ABS(variance) DESC
+      ORDER BY ABS(ROUND(COALESCE(issued.total_issued, 0) - SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit), 3)) DESC
     `);
     res.json(rows);
   } catch (err) {

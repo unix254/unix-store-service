@@ -212,31 +212,31 @@ class _InventoryHeader extends StatelessWidget {
     return Container(
       color: AppTheme.surface,
       padding: const EdgeInsets.fromLTRB(24, 16, 16, 12),
-      child: Row(
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        runSpacing: 8,
         children: [
           const Text('Inventory',
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-          const SizedBox(width: 12),
+          const SizedBox(width: 4),
           // Stats chips
           _StatChip(
               label: '$totalItems items',
               color: AppTheme.primary,
               icon: Icons.inventory_2_rounded),
-          const SizedBox(width: 8),
           if (reorderCount > 0)
             _StatChip(
               label: '$reorderCount need reorder',
               color: AppTheme.debtRed,
               icon: Icons.warning_amber_rounded,
             ),
-          const Spacer(),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: onRefresh,
             tooltip: 'Refresh',
             color: AppTheme.primary,
           ),
-          const SizedBox(width: 8),
           // Cycle count — manager only
           if (isManager) ...[
             OutlinedButton.icon(
@@ -248,7 +248,6 @@ class _InventoryHeader extends StatelessWidget {
                 side: const BorderSide(color: Color(0xFF7B1FA2)),
               ),
             ),
-            const SizedBox(width: 8),
           ],
           ElevatedButton.icon(
             onPressed: onAdd,

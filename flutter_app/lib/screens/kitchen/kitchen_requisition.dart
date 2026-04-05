@@ -402,38 +402,77 @@ class _Body extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // ── LEFT: Request Form ───────────────────────────────
-        Expanded(
-          flex: 3,
-          child: _RequestForm(
-            items:       items,
-            picked:      picked,
-            qty:         qty,
-            purpose:     purpose,
-            notesCtrl:   notesCtrl,
-            submitting:  submitting,
-            submitError: submitError,
-            search:      search,
-            onSelect:    onSelect,
-            onAdjustQty: onAdjustQty,
-            onPurpose:   onPurpose,
-            onSubmit:    onSubmit,
-            onSearch:    onSearch,
-          ),
-        ),
-        // ── RIGHT: My Requests Today ─────────────────────────
-        SizedBox(
-          width: 320,
-          child: _MyRequestsPanel(
-            requests:   myRequests,
-            loading:    loadingReqs,
-            onRefresh:  onRefreshReqs,
-          ),
-        ),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 800;
+
+        if (isMobile) {
+          return Column(
+            children: [
+              Expanded(
+                child: _RequestForm(
+                  items:       items,
+                  picked:      picked,
+                  qty:         qty,
+                  purpose:     purpose,
+                  notesCtrl:   notesCtrl,
+                  submitting:  submitting,
+                  submitError: submitError,
+                  search:      search,
+                  onSelect:    onSelect,
+                  onAdjustQty: onAdjustQty,
+                  onPurpose:   onPurpose,
+                  onSubmit:    onSubmit,
+                  onSearch:    onSearch,
+                ),
+              ),
+              const Divider(color: Color(0xFF263238), height: 1),
+              SizedBox(
+                height: 250,
+                child: _MyRequestsPanel(
+                  requests:   myRequests,
+                  loading:    loadingReqs,
+                  onRefresh:  onRefreshReqs,
+                ),
+              ),
+            ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── LEFT: Request Form ───────────────────────────────
+            Expanded(
+              flex: 3,
+              child: _RequestForm(
+                items:       items,
+                picked:      picked,
+                qty:         qty,
+                purpose:     purpose,
+                notesCtrl:   notesCtrl,
+                submitting:  submitting,
+                submitError: submitError,
+                search:      search,
+                onSelect:    onSelect,
+                onAdjustQty: onAdjustQty,
+                onPurpose:   onPurpose,
+                onSubmit:    onSubmit,
+                onSearch:    onSearch,
+              ),
+            ),
+            // ── RIGHT: My Requests Today ─────────────────────────
+            SizedBox(
+              width: 320,
+              child: _MyRequestsPanel(
+                requests:   myRequests,
+                loading:    loadingReqs,
+                onRefresh:  onRefreshReqs,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

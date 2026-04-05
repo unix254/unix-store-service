@@ -65,17 +65,17 @@ router.get('/draft-po', async (req, res) => {
         s.id    AS supplier_id,
         s.name  AS supplier_name,
         s.phone AS supplier_phone,
-        COALESCE(usage.daily_avg, 0) AS daily_usage,
+        COALESCE(rs_usage.daily_avg, 0) AS daily_usage,
         ROUND(
           COALESCE(i.reorder_level, 0)
-          + (COALESCE(usage.daily_avg, 0) * COALESCE(i.lead_time_days, 1)),
+          + (COALESCE(rs_usage.daily_avg, 0) * COALESCE(i.lead_time_days, 1)),
           3
         ) AS reorder_threshold,
         GREATEST(0,
           ROUND(
             (COALESCE(i.reorder_level, 0) * 2)
             - i.quantity_in_stock
-            + (COALESCE(usage.daily_avg, 0) * COALESCE(i.lead_time_days, 1)),
+            + (COALESCE(rs_usage.daily_avg, 0) * COALESCE(i.lead_time_days, 1)),
             3
           )
         ) AS suggested_order_qty
@@ -88,10 +88,10 @@ router.get('/draft-po', async (req, res) => {
         WHERE status = 'Issued'
           AND requested_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
         GROUP BY inventory_item_id
-      ) usage ON usage.inventory_item_id = i.id
+      ) AS rs_usage ON rs_usage.inventory_item_id = i.id
       WHERE i.quantity_in_stock <=
         COALESCE(i.reorder_level, 0)
-        + (COALESCE(usage.daily_avg, 0) * COALESCE(i.lead_time_days, 1))
+        + (COALESCE(rs_usage.daily_avg, 0) * COALESCE(i.lead_time_days, 1))
       ORDER BY i.category, i.name
     `);
     res.json(rows);
