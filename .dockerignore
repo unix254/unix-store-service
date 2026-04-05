@@ -1,0 +1,13 @@
+node_modules
+npm-debug.log
+.git
+.idea
+.vscode
+.env*
+flutter_app/build/
+flutter_app/.dart_tool/
+flutter_app/.pub-cache/
+flutter_app/.pub/
+flutter_app/*.iml
+flutter_app/.idea/
+flutter_app/.vscode/

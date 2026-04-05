@@ -142,4 +142,63 @@ router.get('/alerts/upcoming-debt', async (req, res) => {
   }
 });
 
+// ── Order Message (SMS / WhatsApp Stub) ─────────────────────
+
+// POST /api/suppliers/:id/order
+// Builds a formatted order message and returns it as a preview.
+// Future: integrate Africa's Talking (SMS) or WhatsApp Business API.
+// Body: { items: [{ name, quantity, unit }], note: "optional" }
+router.post('/:id/order', async (req, res) => {
+  const { items, note } = req.body;
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'items array is required' });
+  }
+  try {
+    const rows = await query('SELECT * FROM unix_suppliers WHERE id = ?', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Supplier not found' });
+    const supplier = rows[0];
+
+    const today = new Date().toLocaleDateString('en-KE', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+
+    const itemLines = items
+      .map(it => `  • ${it.quantity} ${it.unit} – ${it.name}`)
+      .join('\n');
+
+    const storeUrl = process.env.PUBLIC_URL || 'https://store-dev.unixpos.com';
+
+    const message = [
+      `*ORDER REQUEST – Yunix Store*`,
+      `Date: ${today}`,
+      ``,
+      `Hello *${supplier.name}*,`,
+      `Please prepare the following order:`,
+      ``,
+      itemLines,
+      note ? `\nNote: ${note}` : '',
+      ``,
+      `Kindly confirm availability and delivery time.`,
+      `Thank you.`,
+      ``,
+      `_Sent via Yunix Store Controller_`,
+      `_${storeUrl}_`
+    ].filter(l => l !== undefined).join('\n');
+
+    const whatsappUrl = supplier.phone
+      ? `https://wa.me/${supplier.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`
+      : null;
+
+    res.json({
+      ok: true,
+      supplier: { name: supplier.name, phone: supplier.phone },
+      message,
+      whatsapp_url: whatsappUrl,
+      note: 'SMS/WhatsApp API integration pending. Use whatsapp_url to open in browser.'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
