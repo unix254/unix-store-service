@@ -165,7 +165,7 @@ class _PayRunsScreenState extends State<PayRunsScreen> {
     }
   }
 
-  Future<void> _submit() async {
+  Future<void> _submit([List<String> toPostponeIds = const []]) async {
     if (_selectedRun == null) return;
     final ok = await showDialog<bool>(
       context: context,
@@ -185,6 +185,11 @@ class _PayRunsScreenState extends State<PayRunsScreen> {
     );
     if (ok != true) return;
     try {
+      // Postpone any unchecked suppliers before submitting
+      for (final id in toPostponeIds) {
+        await ApiService.instance.updatePayRunDetail(
+            _selectedRun!['id'] as String, id, {'status': 'Postponed'});
+      }
       await ApiService.instance.submitPayRun(
         _selectedRun!['id'] as String, widget.staff.name);
       await _sendWhatsApp();
@@ -498,14 +503,14 @@ class _RunTile extends StatelessWidget {
 
 // ── Run Detail Panel ───────────────────────────────────────────────────────
 
-class _RunDetailPanel extends StatelessWidget {
+class _RunDetailPanel extends StatefulWidget {
   final Map<String, dynamic> run;
   final Staff staff;
   final VoidCallback onAutoPopulate;
   final void Function(Map<String, dynamic>) onEditAmount;
   final void Function(Map<String, dynamic>) onTogglePostpone;
   final void Function(Map<String, dynamic>) onRemove;
-  final VoidCallback onSubmit;
+  final Future<void> Function(List<String> toPostponeIds) onSubmit;
   final VoidCallback onSendWhatsApp;
   final VoidCallback onApprove;
   final VoidCallback onDisburse;
@@ -526,89 +531,141 @@ class _RunDetailPanel extends StatelessWidget {
   });
 
   @override
+  State<_RunDetailPanel> createState() => _RunDetailPanelState();
+}
+
+class _RunDetailPanelState extends State<_RunDetailPanel> {
+  Set<String> _selectedIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _initSelection();
+  }
+
+  @override
+  void didUpdateWidget(_RunDetailPanel old) {
+    super.didUpdateWidget(old);
+    // Re-seed checkboxes when run or its details change
+    if (old.run['id'] != widget.run['id']) {
+      _initSelection();
+    } else {
+      final oldLen = (old.run['details'] as List?)?.length ?? 0;
+      final newLen = (widget.run['details'] as List?)?.length ?? 0;
+      if (oldLen != newLen) _initSelection();
+    }
+  }
+
+  void _initSelection() {
+    final details = (widget.run['details'] as List?)
+        ?.map((e) => e as Map<String, dynamic>)
+        .toList() ?? [];
+    final included = details.where((d) => d['status'] == 'Included').toList();
+    setState(() {
+      _selectedIds = included.map((d) => d['id'] as String).toSet();
+    });
+  }
+
+  Future<void> _handleSubmit(List<Map<String, dynamic>> included) async {
+    final allIds = included.map((d) => d['id'] as String).toSet();
+    final toPostpone = allIds.difference(_selectedIds).toList();
+    await widget.onSubmit(toPostpone);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final status    = run['status'] as String;
-    final isDraft   = status == 'Draft';
-    final isSubmit  = status == 'Submitted';
-    final isApproved= status == 'Approved';
+    final status      = widget.run['status'] as String;
+    final isDraft     = status == 'Draft';
+    final isSubmit    = status == 'Submitted';
+    final isApproved  = status == 'Approved';
     final isDisbursed = status == 'Disbursed';
-    final details   = (run['details'] as List?)
+    final details = (widget.run['details'] as List?)
         ?.map((e) => e as Map<String, dynamic>)
         .toList() ?? [];
     final included  = details.where((d) => d['status'] == 'Included').toList();
     final postponed = details.where((d) => d['status'] == 'Postponed').toList();
-    final totalApproved = details
-        .where((d) => d['status'] == 'Included')
-        .fold<double>(0, (s, d) =>
-            s + (num.tryParse(d['approved_amount']?.toString() ?? '0') ?? 0).toDouble());
+    final totalApproved = included.fold<double>(0, (s, d) =>
+        s + (num.tryParse(d['approved_amount']?.toString() ?? '0') ?? 0).toDouble());
 
     return Column(
       children: [
         // ── Header ─────────────────────────────────────────────
         Container(
-          padding: const EdgeInsets.fromLTRB(24, 20, 20, 16),
+          padding: const EdgeInsets.fromLTRB(24, 16, 20, 14),
           decoration: const BoxDecoration(
             color: Colors.white,
             border: Border(bottom: BorderSide(color: Color(0xFFE0E0E0))),
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  Text('Pay Run: ${run['run_date']}',
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w700)),
-                  const SizedBox(width: 12),
-                  _StatusBadge(status: status),
-                ]),
-                const SizedBox(height: 4),
-                Text('${included.length} suppliers · ${_kes.format(totalApproved)}',
-                    style: const TextStyle(color: AppTheme.pinMuted, fontSize: 13)),
+              // Row 1: title + status badge
+              Row(children: [
+                Text('Pay Run: ${widget.run['run_date']}',
+                    style: const TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.w700)),
+                const SizedBox(width: 12),
+                _StatusBadge(status: status),
               ]),
-              const Spacer(),
-              // Action buttons by status
-              if (isDraft) ...[
-                OutlinedButton.icon(
-                  onPressed: onAutoPopulate,
-                  icon: const Icon(Icons.auto_awesome_rounded, size: 16),
-                  label: const Text('Auto-Populate'),
-                ),
-                const SizedBox(width: 8),
-                FilledButton.icon(
-                  onPressed: included.isEmpty ? null : onSubmit,
-                  icon: const Icon(Icons.send_rounded, size: 16),
-                  label: const Text('Submit for Approval'),
-                  style: FilledButton.styleFrom(backgroundColor: AppTheme.pinTeal),
-                ),
-              ],
-              if (isSubmit) ...[
-                OutlinedButton.icon(
-                  onPressed: onSendWhatsApp,
-                  icon: const Icon(Icons.share_rounded, size: 16),
-                  label: const Text('Re-send WhatsApp'),
-                ),
-                const SizedBox(width: 8),
-                if (staff.canApprovePayRun)
-                  FilledButton.icon(
-                    onPressed: onApprove,
-                    icon: const Icon(Icons.check_circle_rounded, size: 16),
-                    label: const Text('Mark Approved'),
-                    style: FilledButton.styleFrom(backgroundColor: AppTheme.paidGreen),
-                  ),
-              ],
-              if (isApproved)
-                FilledButton.icon(
-                  onPressed: onDisburse,
-                  icon: const Icon(Icons.account_balance_rounded, size: 16),
-                  label: const Text('Disburse Payments'),
-                  style: FilledButton.styleFrom(backgroundColor: AppTheme.debtRed),
-                ),
-              if (isDisbursed)
-                const Chip(
-                  label: Text('Payments disbursed ✓',
-                      style: TextStyle(color: Colors.white)),
-                  backgroundColor: AppTheme.paidGreen,
-                ),
+              const SizedBox(height: 4),
+              Text('${included.length} suppliers · ${_kes.format(totalApproved)}',
+                  style: const TextStyle(color: AppTheme.pinMuted, fontSize: 13)),
+              // Row 2: action buttons (wrap so they never overflow)
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.end,
+                children: [
+                  if (isDraft) ...[
+                    OutlinedButton.icon(
+                      onPressed: widget.onAutoPopulate,
+                      icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+                      label: const Text('Auto-Populate'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: included.isEmpty
+                          ? null
+                          : () => _handleSubmit(included),
+                      icon: const Icon(Icons.send_rounded, size: 16),
+                      label: Text(_selectedIds.length < included.length
+                          ? 'Submit ${_selectedIds.length}/${included.length} for Approval'
+                          : 'Submit for Approval'),
+                      style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.pinTeal),
+                    ),
+                  ],
+                  if (isSubmit) ...[
+                    OutlinedButton.icon(
+                      onPressed: widget.onSendWhatsApp,
+                      icon: const Icon(Icons.share_rounded, size: 16),
+                      label: const Text('Re-send WhatsApp'),
+                    ),
+                    if (widget.staff.canApprovePayRun)
+                      FilledButton.icon(
+                        onPressed: widget.onApprove,
+                        icon: const Icon(Icons.check_circle_rounded, size: 16),
+                        label: const Text('Mark Approved'),
+                        style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.paidGreen),
+                      ),
+                  ],
+                  if (isApproved)
+                    FilledButton.icon(
+                      onPressed: widget.onDisburse,
+                      icon: const Icon(Icons.account_balance_rounded, size: 16),
+                      label: const Text('Disburse Payments'),
+                      style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.debtRed),
+                    ),
+                  if (isDisbursed)
+                    const Chip(
+                      label: Text('Payments disbursed ✓',
+                          style: TextStyle(color: Colors.white)),
+                      backgroundColor: AppTheme.paidGreen,
+                    ),
+                ],
+              ),
             ],
           ),
         ),
@@ -623,15 +680,28 @@ class _RunDetailPanel extends StatelessWidget {
                 if (included.isNotEmpty) ...[
                   _SectionHeader(
                       icon: Icons.check_circle_outline_rounded,
-                      label: 'To Pay (${included.length})',
+                      label: isDraft
+                          ? 'To Pay (${included.length}) — tick to include'
+                          : 'To Pay (${included.length})',
                       color: AppTheme.paidGreen),
-                  const SizedBox(height: 8),
-                  _SupplierTable(
-                    details: included,
-                    canEdit: isDraft,
-                    onEditAmount: onEditAmount,
-                    onTogglePostpone: onTogglePostpone,
-                    onRemove: onRemove,
+                  const SizedBox(height: 12),
+                  // Group included suppliers by payment_day with optional checkboxes
+                  ..._buildDayGroups(
+                    included,
+                    isDraft || isSubmit,          // canEdit
+                    onEditAmount: widget.onEditAmount,
+                    onTogglePostpone: widget.onTogglePostpone,
+                    onRemove: widget.onRemove,
+                    selectedIds: isDraft ? _selectedIds : null,
+                    onToggleSelect: isDraft
+                        ? (id, val) => setState(() {
+                              if (val) {
+                                _selectedIds = {..._selectedIds, id};
+                              } else {
+                                _selectedIds = _selectedIds.difference({id});
+                              }
+                            })
+                        : null,
                   ),
                   const SizedBox(height: 24),
                 ],
@@ -644,9 +714,9 @@ class _RunDetailPanel extends StatelessWidget {
                   _SupplierTable(
                     details: postponed,
                     canEdit: isDraft,
-                    onEditAmount: onEditAmount,
-                    onTogglePostpone: onTogglePostpone,
-                    onRemove: onRemove,
+                    onEditAmount: widget.onEditAmount,
+                    onTogglePostpone: widget.onTogglePostpone,
+                    onRemove: widget.onRemove,
                   ),
                 ],
                 if (included.isEmpty && postponed.isEmpty)
@@ -661,8 +731,10 @@ class _RunDetailPanel extends StatelessWidget {
                             style: TextStyle(color: Colors.grey.shade500)),
                         if (isDraft) ...[
                           const SizedBox(height: 8),
-                          Text('Tap "Auto-Populate" to add suppliers with outstanding debt.',
-                              style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
+                          Text(
+                              'Tap "Auto-Populate" to add suppliers with outstanding debt.',
+                              style: TextStyle(
+                                  color: Colors.grey.shade400, fontSize: 12)),
                         ],
                       ]),
                     ),
@@ -674,6 +746,94 @@ class _RunDetailPanel extends StatelessWidget {
       ],
     );
   }
+}
+
+// ── Day-grouping helper ────────────────────────────────────────────────────
+
+const _kDayOrder = [
+  'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+  'Friday', 'Saturday', 'Sunday', 'Daily',
+];
+
+List<Widget> _buildDayGroups(
+  List<Map<String, dynamic>> details,
+  bool canEdit, {
+  required void Function(Map<String, dynamic>) onEditAmount,
+  required void Function(Map<String, dynamic>) onTogglePostpone,
+  required void Function(Map<String, dynamic>) onRemove,
+  Set<String>? selectedIds,
+  void Function(String id, bool selected)? onToggleSelect,
+}) {
+  // Group by payment_day; null/empty → 'Unscheduled'
+  final Map<String, List<Map<String, dynamic>>> groups = {};
+  for (final d in details) {
+    final day = (d['payment_day'] as String?)?.trim();
+    final key = (day != null && day.isNotEmpty) ? day : 'Unscheduled';
+    groups.putIfAbsent(key, () => []).add(d);
+  }
+
+  // Sort groups: known days first (Mon-Sun/Daily), then Unscheduled
+  final sortedKeys = groups.keys.toList()
+    ..sort((a, b) {
+      final ia = _kDayOrder.indexOf(a);
+      final ib = _kDayOrder.indexOf(b);
+      if (ia == -1 && ib == -1) return a.compareTo(b);
+      if (ia == -1) return 1;
+      if (ib == -1) return -1;
+      return ia.compareTo(ib);
+    });
+
+  final widgets = <Widget>[];
+  for (final key in sortedKeys) {
+    final group = groups[key]!;
+    final groupTotal = group.fold<double>(
+        0, (s, d) => s + (num.tryParse(d['approved_amount']?.toString() ?? '0') ?? 0).toDouble());
+
+    widgets.add(
+      Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Row(children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE3F2FD),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: const Color(0xFF90CAF9)),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.calendar_today_rounded,
+                  size: 13, color: Color(0xFF1565C0)),
+              const SizedBox(width: 5),
+              Text(key,
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1565C0))),
+              const SizedBox(width: 6),
+              Text('(${group.length})',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF1565C0))),
+            ]),
+          ),
+          const SizedBox(width: 10),
+          Text(_kes.format(groupTotal),
+              style: const TextStyle(fontSize: 12, color: AppTheme.pinMuted)),
+        ]),
+      ),
+    );
+    widgets.add(
+      _SupplierTable(
+        details: group,
+        canEdit: canEdit,
+        onEditAmount: onEditAmount,
+        onTogglePostpone: onTogglePostpone,
+        onRemove: onRemove,
+        selectedIds: selectedIds,
+        onToggleSelect: onToggleSelect,
+      ),
+    );
+    widgets.add(const SizedBox(height: 16));
+  }
+  return widgets;
 }
 
 class _StatusBadge extends StatelessWidget {
@@ -725,6 +885,9 @@ class _SupplierTable extends StatelessWidget {
   final void Function(Map<String, dynamic>) onEditAmount;
   final void Function(Map<String, dynamic>) onTogglePostpone;
   final void Function(Map<String, dynamic>) onRemove;
+  // Optional checkbox support (Draft mode selection)
+  final Set<String>? selectedIds;
+  final void Function(String id, bool selected)? onToggleSelect;
 
   const _SupplierTable({
     required this.details,
@@ -732,7 +895,11 @@ class _SupplierTable extends StatelessWidget {
     required this.onEditAmount,
     required this.onTogglePostpone,
     required this.onRemove,
+    this.selectedIds,
+    this.onToggleSelect,
   });
+
+  bool get _showCheckboxes => selectedIds != null;
 
   @override
   Widget build(BuildContext context) {
@@ -741,16 +908,25 @@ class _SupplierTable extends StatelessWidget {
       child: Table(
         border: TableBorder.all(color: const Color(0xFFE0E0E0),
             borderRadius: BorderRadius.circular(10)),
-        columnWidths: const {
-          0: FlexColumnWidth(2.5),
-          1: FlexColumnWidth(1.8),
-          2: FlexColumnWidth(1.8),
-          3: FlexColumnWidth(1.5),
-        },
+        columnWidths: _showCheckboxes
+            ? const {
+                0: FixedColumnWidth(46),
+                1: FlexColumnWidth(2.5),
+                2: FlexColumnWidth(1.8),
+                3: FlexColumnWidth(1.8),
+                4: FlexColumnWidth(1.5),
+              }
+            : const {
+                0: FlexColumnWidth(2.5),
+                1: FlexColumnWidth(1.8),
+                2: FlexColumnWidth(1.8),
+                3: FlexColumnWidth(1.5),
+              },
         children: [
           TableRow(
             decoration: const BoxDecoration(color: Color(0xFF37474F)),
             children: [
+              if (_showCheckboxes) _TH(''),
               _TH('Supplier'),
               _TH('Requested'),
               _TH('Approved'),
@@ -760,32 +936,52 @@ class _SupplierTable extends StatelessWidget {
           ...details.asMap().entries.map((e) {
             final i = e.key;
             final d = e.value;
+            final id = d['id'] as String;
             final isPostponed = d['status'] == 'Postponed';
+            final isChecked   = selectedIds?.contains(id) ?? false;
             final requested = num.tryParse(d['requested_amount']?.toString() ?? '0') ?? 0;
             final approved  = num.tryParse(d['approved_amount']?.toString()  ?? '0') ?? 0;
             final isPartial = approved < requested;
 
             return TableRow(
               decoration: BoxDecoration(
-                color: isPostponed
-                    ? Colors.grey.shade50
-                    : (i.isEven ? Colors.white : const Color(0xFFFAFAFA)),
+                color: _showCheckboxes && !isChecked
+                    ? Colors.grey.shade100
+                    : isPostponed
+                        ? Colors.grey.shade50
+                        : (i.isEven ? Colors.white : const Color(0xFFFAFAFA)),
               ),
               children: [
+                // ── Checkbox column (Draft only) ───────────────
+                if (_showCheckboxes)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                    child: Checkbox(
+                      value: isChecked,
+                      onChanged: (v) => onToggleSelect?.call(id, v ?? false),
+                      activeColor: AppTheme.pinTeal,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                // ── Supplier name ──────────────────────────────
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   child: Text(d['supplier_name']?.toString() ?? '—',
                       style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color: isPostponed ? Colors.grey : Colors.black87,
+                          color: (_showCheckboxes && !isChecked) || isPostponed
+                              ? Colors.grey
+                              : Colors.black87,
                           decoration: isPostponed ? TextDecoration.lineThrough : null)),
                 ),
+                // ── Requested ─────────────────────────────────
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   child: Text(_kes.format(requested),
                       style: const TextStyle(fontSize: 13, color: AppTheme.pinMuted)),
                 ),
+                // ── Approved ──────────────────────────────────
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   child: Row(
@@ -795,7 +991,7 @@ class _SupplierTable extends StatelessWidget {
                           style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w700,
-                              color: isPostponed
+                              color: isPostponed || (_showCheckboxes && !isChecked)
                                   ? Colors.grey
                                   : (isPartial ? Colors.orange : AppTheme.paidGreen))),
                       if (isPartial && !isPostponed) ...[
@@ -809,6 +1005,7 @@ class _SupplierTable extends StatelessWidget {
                     ],
                   ),
                 ),
+                // ── Actions ───────────────────────────────────
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                   child: canEdit

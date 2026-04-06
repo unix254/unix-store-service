@@ -48,6 +48,8 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
       _load();
     } on ApiException catch (e) {
       _showError(e.message);
+    } catch (e) {
+      _showError(e.toString());
     }
   }
 
@@ -63,6 +65,8 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
       _load();
     } on ApiException catch (e) {
       _showError(e.message);
+    } catch (e) {
+      _showError(e.toString());
     }
   }
 
@@ -485,14 +489,17 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(_isEdit ? 'Edit Staff Member' : 'Add Staff Member'),
-      content: SizedBox(
-        width: 420,
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420, maxHeight: 520),
+        child: SingleChildScrollView(
+          child: SizedBox(
+            width: 420,
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
               // Name
               TextFormField(
                 controller: _name,
@@ -645,6 +652,8 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
                 }),
               ],
             ],
+              ),
+            ),
           ),
         ),
       ),

@@ -7,9 +7,9 @@ import 'requisition_approval.dart';
 import 'inventory_screen.dart';
 import 'yield_config_screen.dart';
 import 'variance_screen.dart';
-import 'staff_management_screen.dart';
 import 'pay_runs_screen.dart';
 import 'purchase_orders_screen.dart';
+import 'settings_screen.dart';
 
 enum _NavItem {
   suppliers,
@@ -19,7 +19,7 @@ enum _NavItem {
   variance,
   payRuns,
   purchaseOrders,
-  staff
+  settings,
 }
 
 class StoreShell extends StatefulWidget {
@@ -31,44 +31,36 @@ class StoreShell extends StatefulWidget {
 }
 
 class _StoreShellState extends State<StoreShell> {
-  _NavItem _selected = _NavItem.suppliers;
+  late _NavItem _selected;
 
-  // Core nav items available to all store/manager roles
-  static const _coreNavItems = [
-    (
-      icon: Icons.people_alt_rounded,
-      label: 'Suppliers',
-      item: _NavItem.suppliers
-    ),
-    (
-      icon: Icons.inventory_2_rounded,
-      label: 'Inventory',
-      item: _NavItem.inventory
-    ),
-    (
-      icon: Icons.assignment_rounded,
-      label: 'Requisitions',
-      item: _NavItem.requisitions
-    ),
-    (icon: Icons.tune_rounded, label: 'Yield Config', item: _NavItem.yield_),
-    (icon: Icons.analytics_rounded, label: 'Variance', item: _NavItem.variance),
-    (
-      icon: Icons.shopping_cart_rounded,
-      label: 'Purchase Orders',
-      item: _NavItem.purchaseOrders
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    // Default to the first visible nav item for this user
+    final items = _navItems;
+    _selected = items.isNotEmpty ? items.first.item : _NavItem.settings;
+  }
 
-  // Manager-only nav items
-  static const _managerNavItems = [
-    (icon: Icons.payments_rounded, label: 'Pay Runs', item: _NavItem.payRuns),
-    (icon: Icons.badge_rounded, label: 'Staff', item: _NavItem.staff),
-  ];
-
-  List<({IconData icon, String label, _NavItem item})> get _navItems => [
-        ..._coreNavItems,
-        if (widget.staff.isManager) ..._managerNavItems,
-      ];
+  /// Build sidebar nav dynamically from the logged-in user's capabilities.
+  List<({IconData icon, String label, _NavItem item})> get _navItems {
+    final s = widget.staff;
+    return [
+      if (s.canApproveRequisitions)
+        (icon: Icons.assignment_rounded,   label: 'Requisitions',     item: _NavItem.requisitions),
+      if (s.canManageInventory || s.canDraftPO) ...[
+        (icon: Icons.people_alt_rounded,   label: 'Suppliers',        item: _NavItem.suppliers),
+        (icon: Icons.inventory_2_rounded,  label: 'Inventory',        item: _NavItem.inventory),
+        (icon: Icons.tune_rounded,         label: 'Yield Config',     item: _NavItem.yield_),
+        (icon: Icons.shopping_cart_rounded,label: 'Purchase Orders',  item: _NavItem.purchaseOrders),
+      ],
+      if (s.canViewVariance)
+        (icon: Icons.analytics_rounded,    label: 'Variance',         item: _NavItem.variance),
+      if (s.canApprovePayRun)
+        (icon: Icons.payments_rounded,     label: 'Pay Runs',         item: _NavItem.payRuns),
+      if (s.canManageSettings || s.canManageStaff)
+        (icon: Icons.settings_rounded,     label: 'Settings',         item: _NavItem.settings),
+    ];
+  }
 
   Widget _body() {
     switch (_selected) {
@@ -86,8 +78,8 @@ class _StoreShellState extends State<StoreShell> {
         return PurchaseOrdersScreen(staff: widget.staff);
       case _NavItem.payRuns:
         return PayRunsScreen(staff: widget.staff);
-      case _NavItem.staff:
-        return const StaffManagementScreen();
+      case _NavItem.settings:
+        return SettingsScreen(staff: widget.staff);
     }
   }
 
@@ -254,8 +246,8 @@ class _Sidebar extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.all(12),
               child: _NavTile(
-                icon: Icons.lock_outline_rounded,
-                label: 'Lock / Change PIN',
+                icon: Icons.logout_rounded,
+                label: 'Log Out',
                 selected: false,
                 onTap: onLogout,
                 danger: true,

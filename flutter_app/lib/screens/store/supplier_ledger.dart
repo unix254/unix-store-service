@@ -781,35 +781,39 @@ class _SupplierFormDialog extends StatefulWidget {
   State<_SupplierFormDialog> createState() => _SupplierFormDialogState();
 }
 
+const _kPaymentDays = [
+  'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+  'Friday', 'Saturday', 'Sunday', 'Daily',
+];
+
 class _SupplierFormDialogState extends State<_SupplierFormDialog> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameCtrl;
   late TextEditingController _phoneCtrl;
   late TextEditingController _locationCtrl;
-  late TextEditingController _payDayCtrl;
   late TextEditingController _leadTimeCtrl;
   late TextEditingController _notesCtrl;
+  String? _payDay;   // structured dropdown value
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
     final s = widget.existing;
-    _nameCtrl = TextEditingController(text: s?.name ?? '');
-    _phoneCtrl = TextEditingController(text: s?.phone ?? '');
+    _nameCtrl     = TextEditingController(text: s?.name ?? '');
+    _phoneCtrl    = TextEditingController(text: s?.phone ?? '');
     _locationCtrl = TextEditingController(text: s?.location ?? '');
-    _payDayCtrl = TextEditingController(text: s?.paymentDay ?? '');
-    _leadTimeCtrl =
-        TextEditingController(text: s?.leadTimeDays.toString() ?? '1');
-    _notesCtrl = TextEditingController(text: s?.notes ?? '');
+    _leadTimeCtrl = TextEditingController(text: s?.leadTimeDays.toString() ?? '1');
+    _notesCtrl    = TextEditingController(text: s?.notes ?? '');
+    // Seed dropdown — if existing value isn't in the list, ignore (treat as unset)
+    _payDay = (s?.paymentDay != null && _kPaymentDays.contains(s!.paymentDay))
+        ? s.paymentDay
+        : null;
   }
 
   @override
   void dispose() {
-    for (final c in [
-      _nameCtrl, _phoneCtrl, _locationCtrl,
-      _payDayCtrl, _leadTimeCtrl, _notesCtrl
-    ]) {
+    for (final c in [_nameCtrl, _phoneCtrl, _locationCtrl, _leadTimeCtrl, _notesCtrl]) {
       c.dispose();
     }
     super.dispose();
@@ -820,12 +824,12 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
     setState(() => _saving = true);
 
     final body = {
-      'name': _nameCtrl.text.trim(),
-      'phone': _phoneCtrl.text.trim(),
-      'location': _locationCtrl.text.trim(),
-      'payment_day': _payDayCtrl.text.trim(),
+      'name':          _nameCtrl.text.trim(),
+      'phone':         _phoneCtrl.text.trim(),
+      'location':      _locationCtrl.text.trim(),
+      'payment_day':   _payDay ?? '',
       'lead_time_days': int.tryParse(_leadTimeCtrl.text.trim()) ?? 1,
-      'notes': _notesCtrl.text.trim(),
+      'notes':         _notesCtrl.text.trim(),
     };
 
     try {
@@ -882,12 +886,21 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
                 Row(
                   children: [
                     Expanded(
-                      child: TextFormField(
-                        controller: _payDayCtrl,
+                      child: DropdownButtonFormField<String?>(
+                        value: _payDay,
                         decoration: const InputDecoration(
-                            labelText: 'Payment Day',
-                            hintText: 'e.g. Monday',
-                            prefixIcon: Icon(Icons.calendar_today_rounded)),
+                          labelText: 'Payment Day',
+                          prefixIcon: Icon(Icons.calendar_today_rounded),
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text('— Not scheduled —',
+                                  style: TextStyle(color: Colors.grey))),
+                          ..._kPaymentDays.map((d) =>
+                              DropdownMenuItem<String?>(value: d, child: Text(d))),
+                        ],
+                        onChanged: (v) => setState(() => _payDay = v),
                       ),
                     ),
                     const SizedBox(width: 12),

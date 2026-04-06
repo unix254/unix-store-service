@@ -57,6 +57,7 @@ const kAllCapabilities = <(String, String)>[
   ('can_log_waste',            'Log Waste/Spoilage'),
   ('can_manage_staff',         'Manage Staff'),
   ('can_view_variance',        'View Variance Dashboard'),
+  ('can_manage_settings',      'Manage System Settings'),
 ];
 
 /// Default capabilities seeded per role
@@ -64,7 +65,8 @@ List<String> defaultCapabilities(String role) => switch (role) {
       'kitchen' => ['can_log_waste'],
       'store'   => ['can_approve_requisitions', 'can_manage_inventory', 'can_draft_po', 'can_view_variance'],
       'manager' => ['can_approve_requisitions', 'can_manage_inventory', 'can_draft_po',
-                    'can_approve_payrun', 'can_log_waste', 'can_manage_staff', 'can_view_variance'],
+                    'can_approve_payrun', 'can_log_waste', 'can_manage_staff', 'can_view_variance',
+                    'can_manage_settings'],
       'owner'   => kAllCapabilities.map((e) => e.$1).toList(),
       _         => [],
     };

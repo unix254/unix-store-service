@@ -310,34 +310,73 @@ router.get('/:id/whatsapp', async (req, res) => {
       ORDER BY s.name
     `, [req.params.id]);
 
-    const storeUrl = process.env.PUBLIC_URL || 'https://store-dev.unixpos.com';
-    const total = details.reduce((sum, d) => sum + Number(d.approved_amount), 0);
+    // Load business settings (name, slogan, owner contact)
+    const settingsRows = await query(
+      `SELECT setting_key, setting_value FROM unix_settings
+       WHERE setting_key IN ('business_name', 'slogan', 'owner_name', 'owner_phone')`
+    );
+    const settingsMap = {};
+    settingsRows.forEach(r => settingsMap[r.setting_key] = r.setting_value);
+    const busName    = settingsMap['business_name'] || 'Yunix Store';
+    const slogan     = settingsMap['slogan']         || 'Powered by Yunix';
+    const ownerName  = settingsMap['owner_name']     || '';
+    // Phone from settings takes priority; fall back to query param
+    const ownerPhoneRaw = settingsMap['owner_phone'] || req.query.phone || '';
 
-    const lines = details.map(d =>
+    const storeUrl = process.env.PUBLIC_URL || 'https://store-dev.unixpos.com';
+    const total    = details.reduce((sum, d) => sum + Number(d.approved_amount), 0);
+
+    const paymentLines = details.map(d =>
       `  • ${d.supplier_name}: KES ${Number(d.approved_amount).toFixed(2)}`
-    ).join('\n');
+    ).join('\r\n');
+
+    // Format the date properly for East Africa Time without the ugly GMT string
+    const runDateObj = new Date(run.run_date);
+    const runDateStr = isNaN(runDateObj.valueOf()) ? run.run_date : runDateObj.toLocaleDateString('en-KE', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Africa/Nairobi'
+    });
+
+    const greeting = ownerName ? `Hi ${ownerName},` : `Hi,`;
 
     const message = [
-      `*PAYMENT RUN APPROVAL – Yunix Store*`,
-      `Date: ${run.run_date}`,
+      `*PAYMENT RUN APPROVAL REQUEST*`,
+      `*${busName}* | ${runDateStr}`,
       ``,
-      `Please review the following supplier payments:`,
+      `${greeting} please review and approve the following supplier payments:`,
       ``,
-      lines,
+      `───────────────`,
+      paymentLines,
+      `───────────────`,
       ``,
-      `*Total: KES ${total.toFixed(2)}*`,
+      `*TOTAL: KES ${total.toFixed(2)}*`,
       ``,
       `To approve, open the store controller:`,
       `${storeUrl}`,
       ``,
-      `Reply *APPROVED* to confirm, or call to discuss changes.`,
-      `_Sent via Yunix Store Controller_`
-    ].join('\n');
+      `Click APPROVED to confirm, or contact the team to discuss changes.`,
+      ``,
+      `*${busName}*`,
+      `_${slogan}_`
+    ].join('\r\n');
 
-    const ownerPhone = req.query.phone;
-    const whatsappUrl = ownerPhone
-      ? `https://wa.me/${ownerPhone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`
-      : `https://wa.me/?text=${encodeURIComponent(message)}`;
+    // Force strict %0D%0A (CRLF) encoding — prevents Windows from eating line breaks
+    const encodedMessage = encodeURIComponent(message)
+      .replace(/%0A/g, '%0D%0A')
+      .replace(/%0D%0D%0A/g, '%0D%0A');
+
+    // Normalise phone to Kenyan international format (254xxxxxxxxx)
+    // Settings-stored owner_phone takes priority over query param
+    let cleanPhone = ownerPhoneRaw.replace(/[^0-9]/g, '');
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '254' + cleanPhone.substring(1);
+    } else if (cleanPhone.length === 9) {
+      cleanPhone = '254' + cleanPhone;
+    }
+
+    // api.whatsapp.com/send works reliably in both browser and WhatsApp Web
+    const whatsappUrl = cleanPhone
+      ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMessage}`
+      : `https://api.whatsapp.com/send?text=${encodedMessage}`;
 
     res.json({ ok: true, message, whatsapp_url: whatsappUrl, total });
   } catch (err) {

@@ -106,7 +106,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   Future<void> _showAdjustDialog(InventoryItem item) async {
     final result = await showDialog<bool>(
       context: context,
-      builder: (_) => _AdjustStockDialog(item: item),
+      builder: (_) => _AdjustStockDialog(item: item, suppliers: _suppliers),
     );
     if (result == true) {
       _loadData();
@@ -790,22 +790,33 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
 
 class _AdjustStockDialog extends StatefulWidget {
   final InventoryItem item;
-  const _AdjustStockDialog({required this.item});
+  final List<Supplier> suppliers;
+  const _AdjustStockDialog({required this.item, required this.suppliers});
 
   @override
   State<_AdjustStockDialog> createState() => _AdjustStockDialogState();
 }
 
 class _AdjustStockDialogState extends State<_AdjustStockDialog> {
-  final _amountCtrl = TextEditingController();
-  final _reasonCtrl = TextEditingController();
-  bool _isDelivery  = true; // true = add stock, false = correct (subtract)
-  bool _saving      = false;
+  final _amountCtrl    = TextEditingController();
+  final _reasonCtrl    = TextEditingController();
+  final _totalCostCtrl = TextEditingController();
+  bool    _isDelivery  = true;
+  String? _supplierId;
+  bool    _saving      = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pre-select the item's default supplier
+    _supplierId = widget.item.supplierId;
+  }
 
   @override
   void dispose() {
     _amountCtrl.dispose();
     _reasonCtrl.dispose();
+    _totalCostCtrl.dispose();
     super.dispose();
   }
 
@@ -816,13 +827,25 @@ class _AdjustStockDialogState extends State<_AdjustStockDialog> {
           content: Text('Enter a valid positive amount')));
       return;
     }
+    // If delivery mode, validate invoice cost is provided
+    if (_isDelivery) {
+      final cost = double.tryParse(_totalCostCtrl.text.trim());
+      if (cost == null || cost <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Enter the total invoice cost (KES) for this delivery')));
+        return;
+      }
+    }
     setState(() => _saving = true);
     try {
-      final delta = _isDelivery ? amt : -amt;
+      final delta     = _isDelivery ? amt : -amt;
+      final totalCost = double.tryParse(_totalCostCtrl.text.trim());
       await ApiService.instance.adjustStock(
         widget.item.id,
         delta,
-        reason: _reasonCtrl.text.trim(),
+        reason:     _reasonCtrl.text.trim(),
+        supplierId: _isDelivery ? _supplierId : null,
+        totalCost:  _isDelivery ? totalCost   : null,
       );
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
@@ -847,94 +870,150 @@ class _AdjustStockDialogState extends State<_AdjustStockDialog> {
         ],
       ),
       content: SizedBox(
-        width: 400,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Current stock indicator
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTheme.scaffold,
-                borderRadius: BorderRadius.circular(10),
+        width: 460,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Current stock indicator
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.scaffold,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.inventory_2_rounded,
+                        color: Colors.grey.shade600, size: 18),
+                    const SizedBox(width: 8),
+                    Text('Current stock:  ',
+                        style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                    Text(
+                      '${currentStock.toStringAsFixed(currentStock % 1 == 0 ? 0 : 1)} '
+                      '${widget.item.unitOfMeasure}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 14),
+                    ),
+                  ],
+                ),
               ),
-              child: Row(
+              const SizedBox(height: 16),
+
+              // Type toggle
+              Row(
                 children: [
-                  Icon(Icons.inventory_2_rounded,
-                      color: Colors.grey.shade600, size: 18),
-                  const SizedBox(width: 8),
-                  Text('Current stock:  ',
-                      style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-                  Text(
-                    '${currentStock.toStringAsFixed(currentStock % 1 == 0 ? 0 : 1)} '
-                    '${widget.item.unitOfMeasure}',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w700, fontSize: 14),
+                  Expanded(
+                    child: _TypeToggle(
+                      label:    'Receive Delivery',
+                      icon:     Icons.add_circle_rounded,
+                      selected: _isDelivery,
+                      color:    AppTheme.paidGreen,
+                      onTap:    () => setState(() => _isDelivery = true),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _TypeToggle(
+                      label:    'Correction / Removal',
+                      icon:     Icons.remove_circle_rounded,
+                      selected: !_isDelivery,
+                      color:    AppTheme.debtRed,
+                      onTap:    () => setState(() => _isDelivery = false),
+                    ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 14),
 
-            // Type toggle
-            Row(
-              children: [
-                Expanded(
-                  child: _TypeToggle(
-                    label:    'Receive Delivery',
-                    icon:     Icons.add_circle_rounded,
-                    selected: _isDelivery,
-                    color:    AppTheme.paidGreen,
-                    onTap:    () => setState(() => _isDelivery = true),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _TypeToggle(
-                    label:    'Correction / Removal',
-                    icon:     Icons.remove_circle_rounded,
-                    selected: !_isDelivery,
-                    color:    AppTheme.debtRed,
-                    onTap:    () => setState(() => _isDelivery = false),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-
-            // Amount field
-            TextFormField(
-              controller: _amountCtrl,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText:  'Amount (${widget.item.unitOfMeasure})',
-                prefixIcon: Icon(
-                  _isDelivery ? Icons.add_rounded : Icons.remove_rounded,
-                  color: _isDelivery ? AppTheme.paidGreen : AppTheme.debtRed,
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(
+              // Amount field
+              TextFormField(
+                controller: _amountCtrl,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText:  'Amount (${widget.item.unitOfMeasure})',
+                  prefixIcon: Icon(
+                    _isDelivery ? Icons.add_rounded : Icons.remove_rounded,
                     color: _isDelivery ? AppTheme.paidGreen : AppTheme.debtRed,
-                    width: 2,
                   ),
-                  borderRadius: BorderRadius.circular(10),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(
+                      color: _isDelivery ? AppTheme.paidGreen : AppTheme.debtRed,
+                      width: 2,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: 12),
+
+              // ── Delivery-only fields ────────────────────────────
+              if (_isDelivery) ...[
+                // Supplier dropdown
+                DropdownButtonFormField<String?>(
+                  value: _supplierId,
+                  decoration: const InputDecoration(
+                    labelText: 'Supplier (for debt tracking)',
+                    prefixIcon: Icon(Icons.people_alt_rounded),
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('— No supplier / cash purchase —',
+                            style: TextStyle(color: Colors.grey))),
+                    ...widget.suppliers.map((s) =>
+                        DropdownMenuItem<String?>(value: s.id, child: Text(s.name))),
+                  ],
+                  onChanged: (v) => setState(() => _supplierId = v),
+                ),
+                const SizedBox(height: 12),
+                // Invoice cost
+                TextFormField(
+                  controller: _totalCostCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Total Invoice Cost (KES) *',
+                    hintText: 'e.g. 4500',
+                    prefixIcon: Icon(Icons.receipt_long_rounded),
+                    prefixText: 'KES ',
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                ),
+                const SizedBox(height: 6),
+                // Explainer
+                if (_supplierId != null)
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8F5E9),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(children: const [
+                      Icon(Icons.link_rounded, size: 14, color: AppTheme.paidGreen),
+                      SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Invoice cost will be added to the supplier\'s debt automatically.',
+                          style: TextStyle(fontSize: 11, color: Color(0xFF2E7D32)),
+                        ),
+                      ),
+                    ]),
+                  ),
+                const SizedBox(height: 12),
+              ],
+
+              // Reason / reference
+              TextFormField(
+                controller: _reasonCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Invoice Ref / Notes (optional)',
+                  hintText: 'e.g. Invoice #1234, Morning delivery',
+                  prefixIcon: Icon(Icons.notes_rounded),
                 ),
               ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            ),
-            const SizedBox(height: 12),
-
-            // Reason
-            TextFormField(
-              controller: _reasonCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Reason / Reference (optional)',
-                hintText: 'e.g. Invoice #1234, Morning delivery',
-                prefixIcon: Icon(Icons.notes_rounded),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       actions: [

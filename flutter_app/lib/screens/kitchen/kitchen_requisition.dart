@@ -8,8 +8,16 @@ import '../../models/requisition.dart';
 import '../../services/api.dart';
 import '../pin_login.dart';
 
+/// A single entry in the request basket.
+class _BasketItem {
+  final InventoryItem item;
+  final double qty;
+  final String purpose;
+  const _BasketItem({required this.item, required this.qty, required this.purpose});
+}
+
 /// Kitchen Tablet UI – designed for 11-inch Android tablet, large touch targets.
-/// Workflow: Pick item → Set quantity → Choose purpose → Submit
+/// Workflow: Pick item → Set quantity → Choose purpose → Add to list → Submit all
 class KitchenRequisitionScreen extends StatefulWidget {
   final Staff staff;
   const KitchenRequisitionScreen({super.key, required this.staff});
@@ -24,10 +32,11 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
   List<InventoryItem> _items = [];
   InventoryItem? _picked;
   double _qty = 1.0;
-  String _purpose = 'Sales'; // 'Sales' | 'Staff Meal'
+  String _purpose = 'Sales';
   final _notesCtrl = TextEditingController();
   String _search = '';
 
+  List<_BasketItem> _basket = [];
   List<Requisition> _myRequests = [];
   bool _loadingItems = true;
   bool _loadingRequests = false;
@@ -50,10 +59,7 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
     setState(() => _loadingItems = true);
     try {
       final items = await ApiService.instance.getInventory();
-      setState(() {
-        _items = items;
-        _loadingItems = false;
-      });
+      setState(() { _items = items; _loadingItems = false; });
     } catch (e) {
       setState(() => _loadingItems = false);
     }
@@ -64,13 +70,8 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
     setState(() => _loadingRequests = true);
     try {
       final all = await ApiService.instance.getRequisitions();
-      final mine = all
-          .where((r) => r.requestedBy == widget.staff.name)
-          .toList();
-      setState(() {
-        _myRequests = mine;
-        _loadingRequests = false;
-      });
+      final mine = all.where((r) => r.requestedBy == widget.staff.name).toList();
+      setState(() { _myRequests = mine; _loadingRequests = false; });
     } catch (_) {
       setState(() => _loadingRequests = false);
     }
@@ -78,18 +79,90 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
 
   void _selectItem(InventoryItem item) {
     HapticFeedback.selectionClick();
-    setState(() {
-      _picked = item;
-      _qty = 1.0;
-      _submitError = null;
-    });
+    setState(() { _picked = item; _qty = 1.0; _submitError = null; });
   }
 
   void _adjustQty(double delta) {
     HapticFeedback.lightImpact();
+    setState(() => _qty = (_qty + delta).clamp(0.5, 9999));
+  }
+
+  void _setQty(double qty) => setState(() => _qty = qty.clamp(0.5, 9999));
+
+  // Opens a dialog to type a quantity directly
+  Future<void> _editQtyDirect() async {
+    if (_picked == null) return;
+    final result = await showDialog<double>(
+      context: context,
+      builder: (_) => _QtyInputDialog(initial: _qty, uom: _picked!.unitOfMeasure),
+    );
+    if (result != null) _setQty(result);
+  }
+
+  // Adds the currently picked item to the basket, then resets the picker
+  void _addToBasket() {
+    if (_picked == null) return;
+    HapticFeedback.mediumImpact();
+    final item = _picked!;
+    final qty = _qty;
+    final purpose = _purpose;
+    // Merge if same item + purpose already in list
+    final idx = _basket.indexWhere((b) => b.item.id == item.id && b.purpose == purpose);
     setState(() {
-      _qty = (_qty + delta).clamp(0.5, 9999);
+      if (idx >= 0) {
+        final existing = _basket[idx];
+        _basket = List.from(_basket)
+          ..[idx] = _BasketItem(item: existing.item, qty: existing.qty + qty, purpose: existing.purpose);
+      } else {
+        _basket = [..._basket, _BasketItem(item: item, qty: qty, purpose: purpose)];
+      }
+      _picked = null;
+      _qty = 1.0;
     });
+  }
+
+  void _removeFromBasket(int index) {
+    HapticFeedback.lightImpact();
+    setState(() => _basket = List.from(_basket)..removeAt(index));
+  }
+
+  Future<void> _submit() async {
+    if (_basket.isEmpty) return;
+    setState(() { _submitting = true; _submitError = null; });
+    final n = _basket.length;
+    final notes = _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim();
+    try {
+      for (final b in _basket) {
+        await ApiService.instance.submitRequisition(
+          inventoryItemId: b.item.id,
+          quantity:        b.qty,
+          unitOfMeasure:   b.item.unitOfMeasure,
+          requestedBy:     widget.staff.name,
+          purpose:         b.purpose,
+          notes:           notes,
+        );
+      }
+      HapticFeedback.heavyImpact();
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _basket = [];
+        _picked = null;
+        _qty = 1.0;
+        _purpose = 'Sales';
+        _notesCtrl.clear();
+      });
+      _loadMyRequests();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('✅  $n item${n == 1 ? '' : 's'} requested! Waiting for storekeeper.'),
+        backgroundColor: AppTheme.paidGreen,
+        duration: const Duration(seconds: 3),
+      ));
+    } on ApiException catch (e) {
+      setState(() { _submitting = false; _submitError = e.message; });
+    } catch (e) {
+      setState(() { _submitting = false; _submitError = 'Connection error. Try again.'; });
+    }
   }
 
   Future<void> _logWaste() async {
@@ -106,7 +179,7 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF1A2634),
-        title: Row(children: const [
+        title: const Row(children: [
           Icon(Icons.delete_rounded, color: Color(0xFFEF5350), size: 22),
           SizedBox(width: 8),
           Text('Log Wastage / Spoilage',
@@ -126,6 +199,8 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
+                  filled: true,
+                  fillColor: const Color(0xFF0F1923),
                   labelText: 'Wasted Quantity (${_picked!.unitOfMeasure})',
                   labelStyle: const TextStyle(color: Colors.white54),
                   enabledBorder: const OutlineInputBorder(
@@ -139,6 +214,8 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
                 controller: notesCtrl,
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
+                  filled: true,
+                  fillColor: Color(0xFF0F1923),
                   labelText: 'Reason (optional)',
                   labelStyle: TextStyle(color: Colors.white54),
                   enabledBorder: OutlineInputBorder(
@@ -200,49 +277,6 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
     }
   }
 
-  Future<void> _submit() async {
-    if (_picked == null) return;
-    setState(() {
-      _submitting = true;
-      _submitError = null;
-    });
-    try {
-      await ApiService.instance.submitRequisition(
-        inventoryItemId: _picked!.id,
-        quantity:        _qty,
-        unitOfMeasure:   _picked!.unitOfMeasure,
-        requestedBy:     widget.staff.name,
-        purpose:         _purpose,
-        notes:           _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
-      );
-      HapticFeedback.heavyImpact();
-      if (!mounted) return;
-      setState(() {
-        _submitting = false;
-        _picked = null;
-        _qty = 1.0;
-        _purpose = 'Sales';
-        _notesCtrl.clear();
-      });
-      _loadMyRequests();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('✅  Request submitted! Waiting for storekeeper.'),
-        backgroundColor: AppTheme.paidGreen,
-        duration: Duration(seconds: 3),
-      ));
-    } on ApiException catch (e) {
-      setState(() {
-        _submitting = false;
-        _submitError = e.message;
-      });
-    } catch (e) {
-      setState(() {
-        _submitting = false;
-        _submitError = 'Connection error. Try again.';
-      });
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -258,22 +292,26 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
                   : _items.isEmpty
                       ? const _EmptyInventory()
                       : _Body(
-                          items:       _items,
-                          picked:      _picked,
-                          qty:         _qty,
-                          purpose:     _purpose,
-                          notesCtrl:   _notesCtrl,
-                          submitting:  _submitting,
-                          submitError: _submitError,
-                          myRequests:  _myRequests,
-                          loadingReqs: _loadingRequests,
-                          search:      _search,
-                          onSelect:    _selectItem,
-                          onAdjustQty: _adjustQty,
-                          onPurpose:   (p) => setState(() => _purpose = p),
-                          onSubmit:    _submit,
-                          onRefreshReqs: _loadMyRequests,
-                          onSearch:    (v) => setState(() => _search = v),
+                          items:              _items,
+                          picked:             _picked,
+                          qty:                _qty,
+                          purpose:            _purpose,
+                          notesCtrl:          _notesCtrl,
+                          submitting:         _submitting,
+                          submitError:        _submitError,
+                          myRequests:         _myRequests,
+                          loadingReqs:        _loadingRequests,
+                          search:             _search,
+                          basket:             _basket,
+                          onSelect:           _selectItem,
+                          onAdjustQty:        _adjustQty,
+                          onEditQty:          _editQtyDirect,
+                          onPurpose:          (p) => setState(() => _purpose = p),
+                          onAddToBasket:      _addToBasket,
+                          onRemoveFromBasket: _removeFromBasket,
+                          onSubmit:           _submit,
+                          onRefreshReqs:      _loadMyRequests,
+                          onSearch:           (v) => setState(() => _search = v),
                         ),
             ),
           ],
@@ -310,7 +348,6 @@ class _Header extends StatelessWidget {
                 letterSpacing: 2,
               )),
           const Spacer(),
-          // Log Waste button
           OutlinedButton.icon(
             onPressed: onLogWaste,
             icon: const Icon(Icons.delete_rounded, size: 16,
@@ -323,7 +360,6 @@ class _Header extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          // Staff badge
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
             decoration: BoxDecoration(
@@ -348,9 +384,9 @@ class _Header extends StatelessWidget {
             onPressed: () => Navigator.of(context).pushReplacement(
               MaterialPageRoute(builder: (_) => const PinLoginScreen()),
             ),
-            icon: const Icon(Icons.lock_outline_rounded,
+            icon: const Icon(Icons.logout_rounded,
                 color: AppTheme.pinMuted, size: 18),
-            label: const Text('Lock',
+            label: const Text('Log Out',
                 style: TextStyle(color: AppTheme.pinMuted, fontSize: 13)),
           ),
         ],
@@ -360,7 +396,7 @@ class _Header extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Main body – split into left form + right request history
+// Main body
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _Body extends StatelessWidget {
@@ -374,9 +410,13 @@ class _Body extends StatelessWidget {
   final List<Requisition> myRequests;
   final bool loadingReqs;
   final String search;
+  final List<_BasketItem> basket;
   final void Function(InventoryItem) onSelect;
   final void Function(double) onAdjustQty;
+  final VoidCallback onEditQty;
   final void Function(String) onPurpose;
+  final VoidCallback onAddToBasket;
+  final void Function(int) onRemoveFromBasket;
   final VoidCallback onSubmit;
   final VoidCallback onRefreshReqs;
   final void Function(String) onSearch;
@@ -392,9 +432,13 @@ class _Body extends StatelessWidget {
     required this.myRequests,
     required this.loadingReqs,
     required this.search,
+    required this.basket,
     required this.onSelect,
     required this.onAdjustQty,
+    required this.onEditQty,
     required this.onPurpose,
+    required this.onAddToBasket,
+    required this.onRemoveFromBasket,
     required this.onSubmit,
     required this.onRefreshReqs,
     required this.onSearch,
@@ -406,33 +450,37 @@ class _Body extends StatelessWidget {
       builder: (context, constraints) {
         final isMobile = constraints.maxWidth < 800;
 
+        final form = _RequestForm(
+          items:              items,
+          picked:             picked,
+          qty:                qty,
+          purpose:            purpose,
+          notesCtrl:          notesCtrl,
+          submitting:         submitting,
+          submitError:        submitError,
+          search:             search,
+          basket:             basket,
+          onSelect:           onSelect,
+          onAdjustQty:        onAdjustQty,
+          onEditQty:          onEditQty,
+          onPurpose:          onPurpose,
+          onAddToBasket:      onAddToBasket,
+          onRemoveFromBasket: onRemoveFromBasket,
+          onSubmit:           onSubmit,
+          onSearch:           onSearch,
+        );
+
         if (isMobile) {
           return Column(
             children: [
-              Expanded(
-                child: _RequestForm(
-                  items:       items,
-                  picked:      picked,
-                  qty:         qty,
-                  purpose:     purpose,
-                  notesCtrl:   notesCtrl,
-                  submitting:  submitting,
-                  submitError: submitError,
-                  search:      search,
-                  onSelect:    onSelect,
-                  onAdjustQty: onAdjustQty,
-                  onPurpose:   onPurpose,
-                  onSubmit:    onSubmit,
-                  onSearch:    onSearch,
-                ),
-              ),
+              Expanded(child: form),
               const Divider(color: Color(0xFF263238), height: 1),
               SizedBox(
                 height: 250,
                 child: _MyRequestsPanel(
-                  requests:   myRequests,
-                  loading:    loadingReqs,
-                  onRefresh:  onRefreshReqs,
+                  requests:  myRequests,
+                  loading:   loadingReqs,
+                  onRefresh: onRefreshReqs,
                 ),
               ),
             ],
@@ -442,32 +490,13 @@ class _Body extends StatelessWidget {
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── LEFT: Request Form ───────────────────────────────
-            Expanded(
-              flex: 3,
-              child: _RequestForm(
-                items:       items,
-                picked:      picked,
-                qty:         qty,
-                purpose:     purpose,
-                notesCtrl:   notesCtrl,
-                submitting:  submitting,
-                submitError: submitError,
-                search:      search,
-                onSelect:    onSelect,
-                onAdjustQty: onAdjustQty,
-                onPurpose:   onPurpose,
-                onSubmit:    onSubmit,
-                onSearch:    onSearch,
-              ),
-            ),
-            // ── RIGHT: My Requests Today ─────────────────────────
+            Expanded(flex: 3, child: form),
             SizedBox(
               width: 320,
               child: _MyRequestsPanel(
-                requests:   myRequests,
-                loading:    loadingReqs,
-                onRefresh:  onRefreshReqs,
+                requests:  myRequests,
+                loading:   loadingReqs,
+                onRefresh: onRefreshReqs,
               ),
             ),
           ],
@@ -490,11 +519,15 @@ class _RequestForm extends StatelessWidget {
   final bool submitting;
   final String? submitError;
   final String search;
+  final List<_BasketItem> basket;
   final void Function(InventoryItem) onSelect;
   final void Function(double) onAdjustQty;
+  final VoidCallback onEditQty;
   final void Function(String) onPurpose;
-  final void Function(String) onSearch;
+  final VoidCallback onAddToBasket;
+  final void Function(int) onRemoveFromBasket;
   final VoidCallback onSubmit;
+  final void Function(String) onSearch;
 
   const _RequestForm({
     required this.items,
@@ -505,11 +538,15 @@ class _RequestForm extends StatelessWidget {
     required this.submitting,
     required this.submitError,
     required this.search,
+    required this.basket,
     required this.onSelect,
     required this.onAdjustQty,
+    required this.onEditQty,
     required this.onPurpose,
-    required this.onSearch,
+    required this.onAddToBasket,
+    required this.onRemoveFromBasket,
     required this.onSubmit,
+    required this.onSearch,
   });
 
   @override
@@ -525,6 +562,7 @@ class _RequestForm extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+
           // ── Section 1: Item Picker ─────────────────────────
           const _SectionLabel(label: '1  WHAT DO YOU NEED?'),
           const SizedBox(height: 10),
@@ -536,14 +574,17 @@ class _RequestForm extends StatelessWidget {
               hintStyle: TextStyle(color: Colors.white.withOpacity(0.35)),
               filled: true,
               fillColor: const Color(0xFF1E2D3D),
-              prefixIcon: const Icon(Icons.search_rounded, color: AppTheme.pinMuted, size: 20),
+              prefixIcon: const Icon(Icons.search_rounded,
+                  color: AppTheme.pinMuted, size: 20),
               suffixIcon: search.isNotEmpty
                   ? IconButton(
-                      icon: const Icon(Icons.clear_rounded, color: AppTheme.pinMuted, size: 18),
+                      icon: const Icon(Icons.clear_rounded,
+                          color: AppTheme.pinMuted, size: 18),
                       onPressed: () => onSearch(''),
                     )
                   : null,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide.none,
@@ -554,33 +595,86 @@ class _RequestForm extends StatelessWidget {
           _ItemGrid(items: filteredItems, picked: picked, onSelect: onSelect),
           const SizedBox(height: 24),
 
+          // ── Sections 2 & 3 only when item is picked ────────
           if (picked != null) ...[
-            // ── Section 2: Quantity ────────────────────────────
             const _SectionLabel(label: '2  HOW MUCH?'),
             const SizedBox(height: 12),
             _QuantityStepper(
-              qty:     qty,
-              uom:     picked!.unitOfMeasure,
-              onMinus: () => onAdjustQty(-0.5),
-              onPlus:  () => onAdjustQty(0.5),
+              qty:          qty,
+              uom:          picked!.unitOfMeasure,
+              onMinus:      () => onAdjustQty(-0.5),
+              onPlus:       () => onAdjustQty(0.5),
+              onTapDisplay: onEditQty,
             ),
             const SizedBox(height: 24),
 
-            // ── Section 3: Purpose ─────────────────────────────
             const _SectionLabel(label: '3  WHAT IS IT FOR?'),
             const SizedBox(height: 12),
-            _PurposePicker(
-              current:  purpose,
-              onChange: onPurpose,
-            ),
+            _PurposePicker(current: purpose, onChange: onPurpose),
             const SizedBox(height: 20),
 
-            // ── Notes (optional) ───────────────────────────────
+            // ── Add to List button ─────────────────────────
+            SizedBox(
+              width: double.infinity,
+              height: 64,
+              child: OutlinedButton.icon(
+                onPressed: onAddToBasket,
+                icon: const Icon(Icons.add_shopping_cart_rounded,
+                    color: AppTheme.pinTeal, size: 22),
+                label: Text(
+                  basket.isEmpty
+                      ? 'ADD TO LIST'
+                      : 'ADD TO LIST  (${basket.length} already)',
+                  style: const TextStyle(
+                    color: AppTheme.pinTeal,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: AppTheme.pinTeal, width: 2),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 28),
+          ],
+
+          // ── Basket ─────────────────────────────────────────
+          if (basket.isNotEmpty) ...[
+            Row(children: [
+              const Icon(Icons.shopping_cart_rounded,
+                  color: AppTheme.pinTeal, size: 18),
+              const SizedBox(width: 8),
+              _SectionLabel(
+                  label: 'YOUR LIST  (${basket.length} item${basket.length == 1 ? '' : 's'})'),
+              const Spacer(),
+              TextButton(
+                onPressed: () {
+                  // Remove all — trigger each removal from last to first
+                  for (int i = basket.length - 1; i >= 0; i--) {
+                    onRemoveFromBasket(i);
+                  }
+                },
+                child: const Text('Clear all',
+                    style: TextStyle(color: AppTheme.debtRed, fontSize: 12)),
+              ),
+            ]),
+            const SizedBox(height: 8),
+            ...basket.asMap().entries.map((e) => _BasketRow(
+                  entry: e.value,
+                  onRemove: () => onRemoveFromBasket(e.key),
+                )),
+            const SizedBox(height: 16),
+
+            // Notes field (shared across all items)
             TextField(
               controller: notesCtrl,
               style: const TextStyle(color: Colors.white, fontSize: 15),
               decoration: InputDecoration(
-                hintText: 'Add a note (optional)…',
+                hintText: 'Add a note for the whole request (optional)…',
                 hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
                 filled: true,
                 fillColor: const Color(0xFF1E2D3D),
@@ -593,16 +687,17 @@ class _RequestForm extends StatelessWidget {
               ),
               maxLines: 2,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
 
-            // ── Error ──────────────────────────────────────────
-            if (submitError != null)
+            // Error
+            if (submitError != null) ...[
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: AppTheme.debtRed.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppTheme.debtRed.withOpacity(0.5)),
+                  border: Border.all(
+                      color: AppTheme.debtRed.withOpacity(0.5)),
                 ),
                 child: Row(
                   children: [
@@ -617,9 +712,10 @@ class _RequestForm extends StatelessWidget {
                   ],
                 ),
               ),
-            if (submitError != null) const SizedBox(height: 14),
+              const SizedBox(height: 14),
+            ],
 
-            // ── Submit Button ──────────────────────────────────
+            // Submit button
             SizedBox(
               width: double.infinity,
               height: 72,
@@ -640,7 +736,9 @@ class _RequestForm extends StatelessWidget {
                     : const Icon(Icons.send_rounded,
                         color: Colors.white, size: 28),
                 label: Text(
-                  submitting ? 'SUBMITTING…' : 'SUBMIT REQUEST',
+                  submitting
+                      ? 'SUBMITTING…'
+                      : 'SUBMIT ${basket.length} ITEM${basket.length == 1 ? '' : 'S'}',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 20,
@@ -650,9 +748,199 @@ class _RequestForm extends StatelessWidget {
                 ),
               ),
             ),
+            const SizedBox(height: 20),
           ],
+
+          // Hint when nothing selected and basket empty
+          if (picked == null && basket.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Center(
+                child: Text(
+                  'Tap an item above to start your request',
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.25), fontSize: 14),
+                ),
+              ),
+            ),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Basket Row
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BasketRow extends StatelessWidget {
+  final _BasketItem entry;
+  final VoidCallback onRemove;
+  const _BasketRow({required this.entry, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) {
+    final qtyStr = entry.qty % 1 == 0
+        ? entry.qty.toStringAsFixed(0)
+        : entry.qty.toStringAsFixed(1);
+    final isMeal = entry.purpose == 'Staff Meal';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A2A38),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF263238)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            isMeal ? Icons.restaurant_rounded : Icons.storefront_rounded,
+            size: 18,
+            color: isMeal ? const Color(0xFFFFB74D) : AppTheme.pinTeal,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(entry.item.name,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700)),
+                Text(
+                  '$qtyStr ${entry.item.unitOfMeasure}  ·  ${entry.purpose}',
+                  style: const TextStyle(
+                      color: AppTheme.pinMuted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close_rounded, size: 20),
+            color: const Color(0xFF607080),
+            onPressed: onRemove,
+            tooltip: 'Remove',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Quantity direct-input dialog
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _QtyInputDialog extends StatefulWidget {
+  final double initial;
+  final String uom;
+  const _QtyInputDialog({required this.initial, required this.uom});
+
+  @override
+  State<_QtyInputDialog> createState() => _QtyInputDialogState();
+}
+
+class _QtyInputDialogState extends State<_QtyInputDialog> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(
+      text: widget.initial % 1 == 0
+          ? widget.initial.toStringAsFixed(0)
+          : widget.initial.toStringAsFixed(1),
+    );
+  }
+
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  void _pick(double v) => setState(() {
+    _ctrl.text = v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+  });
+
+  void _confirm() {
+    final v = double.tryParse(_ctrl.text.trim());
+    if (v != null && v > 0) Navigator.pop(context, v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1A2634),
+      title: Text(
+        'Enter Quantity (${widget.uom.toUpperCase()})',
+        style: const TextStyle(color: Colors.white, fontSize: 16),
+      ),
+      content: SizedBox(
+        width: 320,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Large text input
+            TextField(
+              controller: _ctrl,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 44,
+                  fontWeight: FontWeight.w800),
+              decoration: const InputDecoration(
+                filled: true,
+                fillColor: Color(0xFF0F1923),
+                enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white24)),
+                focusedBorder: OutlineInputBorder(
+                    borderSide:
+                        BorderSide(color: AppTheme.pinTeal, width: 2)),
+              ),
+              onSubmitted: (_) => _confirm(),
+            ),
+            const SizedBox(height: 16),
+            // Quick-pick
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: [5, 10, 25, 50, 100].map((v) {
+                return OutlinedButton(
+                  onPressed: () => _pick(v.toDouble()),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.pinTeal,
+                    side: const BorderSide(color: AppTheme.pinTeal),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: Text('$v',
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.w700)),
+                );
+              }).toList(),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child:
+                const Text('Cancel', style: TextStyle(color: Colors.white54))),
+        ElevatedButton(
+          onPressed: _confirm,
+          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.pinTeal),
+          child: const Text('Set Quantity',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+        ),
+      ],
     );
   }
 }
@@ -705,7 +993,9 @@ class _ItemGrid extends StatelessWidget {
                   child: Text(
                     item.name,
                     style: TextStyle(
-                      color: isSelected ? Colors.white : const Color(0xFFCFD8DC),
+                      color: isSelected
+                          ? Colors.white
+                          : const Color(0xFFCFD8DC),
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
                       height: 1.2,
@@ -730,7 +1020,8 @@ class _ItemGrid extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 12,
                         color: isLow ? AppTheme.debtRed : AppTheme.pinMuted,
-                        fontWeight: isLow ? FontWeight.w700 : FontWeight.normal,
+                        fontWeight:
+                            isLow ? FontWeight.w700 : FontWeight.normal,
                       ),
                     ),
                   ],
@@ -745,7 +1036,7 @@ class _ItemGrid extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Quantity Stepper
+// Quantity Stepper  (tap the number to type it directly)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _QuantityStepper extends StatelessWidget {
@@ -753,12 +1044,14 @@ class _QuantityStepper extends StatelessWidget {
   final String uom;
   final VoidCallback onMinus;
   final VoidCallback onPlus;
+  final VoidCallback onTapDisplay;
 
   const _QuantityStepper({
     required this.qty,
     required this.uom,
     required this.onMinus,
     required this.onPlus,
+    required this.onTapDisplay,
   });
 
   @override
@@ -771,39 +1064,49 @@ class _QuantityStepper extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Minus
           _StepBtn(icon: Icons.remove_rounded, onTap: onMinus),
-          const SizedBox(width: 20),
-          // Display
+          const SizedBox(width: 16),
+          // Tappable quantity display
           Expanded(
-            child: Column(
-              children: [
-                Text(
-                  qty % 1 == 0
-                      ? qty.toStringAsFixed(0)
-                      : qty.toStringAsFixed(1),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 40,
-                    fontWeight: FontWeight.w800,
+            child: GestureDetector(
+              onTap: onTapDisplay,
+              child: Column(
+                children: [
+                  Text(
+                    qty % 1 == 0
+                        ? qty.toStringAsFixed(0)
+                        : qty.toStringAsFixed(1),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 40,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
-                  textAlign: TextAlign.center,
-                ),
-                Text(
-                  uom.toUpperCase(),
-                  style: const TextStyle(
-                    color: AppTheme.pinTeal,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 2,
+                  Text(
+                    uom.toUpperCase(),
+                    style: const TextStyle(
+                      color: AppTheme.pinTeal,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 2,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  const Text(
+                    'tap to type',
+                    style: TextStyle(
+                        color: AppTheme.pinMuted,
+                        fontSize: 10,
+                        letterSpacing: 0.5),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
             ),
           ),
-          const SizedBox(width: 20),
-          // Plus
+          const SizedBox(width: 16),
           _StepBtn(icon: Icons.add_rounded, onTap: onPlus),
         ],
       ),
@@ -827,9 +1130,7 @@ class _StepBtn extends StatelessWidget {
         child: SizedBox(
           width: 72,
           height: 72,
-          child: Center(
-            child: Icon(icon, color: Colors.white, size: 32),
-          ),
+          child: Center(child: Icon(icon, color: Colors.white, size: 32)),
         ),
       ),
     );
@@ -852,21 +1153,23 @@ class _PurposePicker extends StatelessWidget {
       children: [
         Expanded(
           child: _PurposeBtn(
-            label: 'FOR SALES',
-            icon: '📦',
-            selected: current == 'Sales',
-            color: AppTheme.pinTeal,
-            onTap: () => onChange('Sales'),
+            label:     'FOR SALES',
+            icon:      Icons.storefront_rounded,
+            iconColor: AppTheme.pinTeal,
+            selected:  current == 'Sales',
+            color:     AppTheme.pinTeal,
+            onTap:     () => onChange('Sales'),
           ),
         ),
         const SizedBox(width: 14),
         Expanded(
           child: _PurposeBtn(
-            label: 'STAFF MEAL',
-            icon: '🍽️',
-            selected: current == 'Staff Meal',
-            color: AppTheme.secondary,
-            onTap: () => onChange('Staff Meal'),
+            label:     'STAFF MEAL',
+            icon:      Icons.restaurant_rounded,
+            iconColor: const Color(0xFFFFB74D),
+            selected:  current == 'Staff Meal',
+            color:     const Color(0xFFFFB74D),
+            onTap:     () => onChange('Staff Meal'),
           ),
         ),
       ],
@@ -876,7 +1179,8 @@ class _PurposePicker extends StatelessWidget {
 
 class _PurposeBtn extends StatelessWidget {
   final String label;
-  final String icon;
+  final IconData icon;
+  final Color iconColor;
   final bool selected;
   final Color color;
   final VoidCallback onTap;
@@ -884,6 +1188,7 @@ class _PurposeBtn extends StatelessWidget {
   const _PurposeBtn({
     required this.label,
     required this.icon,
+    required this.iconColor,
     required this.selected,
     required this.color,
     required this.onTap,
@@ -911,7 +1216,11 @@ class _PurposeBtn extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(icon, style: const TextStyle(fontSize: 24)),
+              Icon(
+                icon,
+                size: 28,
+                color: selected ? iconColor : const Color(0xFF607080),
+              ),
               const SizedBox(height: 4),
               Text(
                 label,
@@ -951,7 +1260,6 @@ class _MyRequestsPanel extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 8, 12),
             child: Row(
@@ -978,8 +1286,6 @@ class _MyRequestsPanel extends StatelessWidget {
             ),
           ),
           const Divider(color: Color(0xFF1E2D3D), height: 1),
-
-          // List
           Expanded(
             child: loading
                 ? const Center(
@@ -993,10 +1299,7 @@ class _MyRequestsPanel extends StatelessWidget {
                         padding: const EdgeInsets.all(12),
                         itemCount: requests.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 8),
-                        itemBuilder: (_, i) {
-                          final r = requests[i];
-                          return _RequestCard(req: r);
-                        },
+                        itemBuilder: (_, i) => _RequestCard(req: requests[i]),
                       ),
           ),
         ],
@@ -1016,20 +1319,21 @@ class _RequestCard extends StatelessWidget {
     switch (req.status) {
       case 'Issued':
         statusColor = AppTheme.paidGreen;
-        statusIcon = Icons.check_circle_rounded;
+        statusIcon  = Icons.check_circle_rounded;
         break;
       case 'Rejected':
         statusColor = AppTheme.debtRed;
-        statusIcon = Icons.cancel_rounded;
+        statusIcon  = Icons.cancel_rounded;
         break;
       default:
         statusColor = AppTheme.secondary;
-        statusIcon = Icons.access_time_rounded;
+        statusIcon  = Icons.access_time_rounded;
     }
 
     final timeFmt = DateFormat('HH:mm');
     final time = req.requestedAt.isNotEmpty
-        ? timeFmt.format(DateTime.tryParse(req.requestedAt) ?? DateTime.now())
+        ? timeFmt.format(
+            DateTime.tryParse(req.requestedAt) ?? DateTime.now())
         : '–';
 
     return Container(
@@ -1056,15 +1360,14 @@ class _RequestCard extends StatelessWidget {
                 Text(
                   '${req.quantity.toStringAsFixed(req.quantity % 1 == 0 ? 0 : 1)} '
                   '${req.unitOfMeasure ?? req.itemUom ?? ''} · ${req.purpose}',
-                  style: const TextStyle(
-                      color: AppTheme.pinMuted, fontSize: 11),
+                  style:
+                      const TextStyle(color: AppTheme.pinMuted, fontSize: 11),
                 ),
               ],
             ),
           ),
           Text(time,
-              style:
-                  const TextStyle(color: AppTheme.pinMuted, fontSize: 11)),
+              style: const TextStyle(color: AppTheme.pinMuted, fontSize: 11)),
         ],
       ),
     );
@@ -1112,7 +1415,8 @@ class _EmptyInventory extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             'Ask the storekeeper to add items first.',
-            style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 14),
+            style: TextStyle(
+                color: AppTheme.pinMuted.withOpacity(0.6), fontSize: 14),
           ),
         ],
       ),

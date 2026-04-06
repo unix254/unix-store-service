@@ -19,12 +19,17 @@ class _PinLoginScreenState extends State<PinLoginScreen>
   bool _loading = false;
   String? _error;
 
+  // White-label branding loaded from /api/settings
+  String? _businessName;
+  String? _slogan;
+
   late AnimationController _shakeCtrl;
   late Animation<double> _shakeAnim;
 
   @override
   void initState() {
     super.initState();
+    _loadBranding();
     _shakeCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 450));
     _shakeAnim = TweenSequence<double>([
@@ -34,6 +39,19 @@ class _PinLoginScreenState extends State<PinLoginScreen>
       TweenSequenceItem(tween: Tween(begin: -8, end: 8), weight: 2),
       TweenSequenceItem(tween: Tween(begin: 8, end: 0), weight: 1),
     ]).animate(CurvedAnimation(parent: _shakeCtrl, curve: Curves.easeInOut));
+  }
+
+  Future<void> _loadBranding() async {
+    try {
+      final settings = await ApiService.instance.getSettings();
+      if (!mounted) return;
+      setState(() {
+        _businessName = settings['business_name'];
+        _slogan       = settings['slogan'];
+      });
+    } catch (_) {
+      // Branding is cosmetic — silently ignore failures
+    }
   }
 
   @override
@@ -122,12 +140,33 @@ class _PinLoginScreenState extends State<PinLoginScreen>
                     letterSpacing: 5,
                   ),
                 ),
+                if (_businessName != null && _businessName!.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    _businessName!,
+                    style: const TextStyle(
+                      color: AppTheme.pinTeal,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+                if (_slogan != null && _slogan!.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    _slogan!,
+                    style: const TextStyle(
+                        color: AppTheme.pinMuted, fontSize: 12),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
                 const SizedBox(height: 6),
                 const Text(
                   'Enter your PIN to continue',
                   style: TextStyle(color: AppTheme.pinMuted, fontSize: 13),
                 ),
-                const SizedBox(height: 48),
+                const SizedBox(height: 32),
 
                 // ── PIN Dots ────────────────────────────────────
                 AnimatedBuilder(
@@ -176,7 +215,7 @@ class _PinLoginScreenState extends State<PinLoginScreen>
                     ),
                   ),
                 ),
-                const SizedBox(height: 40),
+                const SizedBox(height: 24),
 
                 // ── Numpad / Spinner ────────────────────────────
                 if (_loading)

@@ -4,13 +4,15 @@ const cors = require('cors');
 const path = require('path');
 const { runMigrations } = require('./db');
 
-const authRouter         = require('./routes/auth');
-const inventoryRouter    = require('./routes/inventory');
-const suppliersRouter    = require('./routes/suppliers');
-const requisitionsRouter = require('./routes/requisitions');
-const yieldRouter        = require('./routes/yield');
-const posRouter          = require('./routes/pos');
-const payRunsRouter      = require('./routes/pay_runs');
+const authRouter            = require('./routes/auth');
+const inventoryRouter       = require('./routes/inventory');
+const suppliersRouter       = require('./routes/suppliers');
+const requisitionsRouter    = require('./routes/requisitions');
+const yieldRouter           = require('./routes/yield');
+const posRouter             = require('./routes/pos');
+const payRunsRouter         = require('./routes/pay_runs');
+const purchaseOrdersRouter  = require('./routes/purchase_orders');
+const settingsRouter        = require('./routes/settings');
 
 const app = express();
 
@@ -18,13 +20,15 @@ app.use(cors());
 app.use(express.json());
 
 // ── API Routes ──────────────────────────────────────────────
-app.use('/api/auth',         authRouter);
-app.use('/api/inventory',    inventoryRouter);
-app.use('/api/suppliers',    suppliersRouter);
-app.use('/api/requisitions', requisitionsRouter);
-app.use('/api/yield',        yieldRouter);
-app.use('/api/pos',          posRouter);
-app.use('/api/pay-runs',     payRunsRouter);
+app.use('/api/auth',             authRouter);
+app.use('/api/inventory',        inventoryRouter);
+app.use('/api/suppliers',        suppliersRouter);
+app.use('/api/requisitions',     requisitionsRouter);
+app.use('/api/yield',            yieldRouter);
+app.use('/api/pos',              posRouter);
+app.use('/api/pay-runs',         payRunsRouter);
+app.use('/api/purchase-orders',  purchaseOrdersRouter);
+app.use('/api/settings',         settingsRouter);
 
 // Health check
 app.get('/health', (req, res) => {

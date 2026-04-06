@@ -165,11 +165,25 @@ class ApiService {
     await _delete('/api/inventory/$id');
   }
 
-  /// Adjust stock level: positive delta = receive delivery, negative = correction
-  Future<void> adjustStock(String id, double delta, {String? reason}) async {
+  /// Adjust stock level: positive delta = receive delivery, negative = correction.
+  /// For deliveries, supply [supplierId] + [totalCost] to auto-post a PURCHASE
+  /// entry on the supplier ledger (zero-friction debt linking).
+  Future<void> adjustStock(
+    String id,
+    double delta, {
+    String? reason,
+    String? changedBy,
+    double? newCostPerUnit,
+    String? supplierId,
+    double? totalCost,
+  }) async {
     await _patch('/api/inventory/$id/adjust', {
       'delta': delta,
       if (reason != null && reason.isNotEmpty) 'reason': reason,
+      if (changedBy != null) 'changed_by': changedBy,
+      if (newCostPerUnit != null) 'new_cost_per_unit': newCostPerUnit,
+      if (supplierId != null) 'supplier_id': supplierId,
+      if (totalCost != null && totalCost > 0) 'total_cost': totalCost,
     });
   }
 
@@ -320,6 +334,45 @@ class ApiService {
     return data as Map<String, dynamic>;
   }
 
+  // ── Purchase Orders ─────────────────────────────────────────
+
+  Future<List<Map<String, dynamic>>> getPurchaseOrders() async {
+    final data = await _get('/api/purchase-orders');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> getPurchaseOrder(String id) async {
+    final data = await _get('/api/purchase-orders/$id');
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> autoDraftPO(String createdBy) async {
+    final data = await _post('/api/purchase-orders/auto-draft', {'created_by': createdBy});
+    return data as Map<String, dynamic>;
+  }
+
+  Future<void> addPoDetail(String poId, Map<String, dynamic> body) async {
+    await _post('/api/purchase-orders/$poId/details', body);
+  }
+
+  Future<void> updatePoDetail(String poId, String detailId, Map<String, dynamic> body) async {
+    await _put('/api/purchase-orders/$poId/details/$detailId', body);
+  }
+
+  Future<void> removePoDetail(String poId, String detailId) async {
+    await _delete('/api/purchase-orders/$poId/details/$detailId');
+  }
+
+  Future<Map<String, dynamic>> submitPO(String id) async {
+    final data = await _patch('/api/purchase-orders/$id/submit', {});
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> approvePO(String id, String approvedBy) async {
+    final data = await _patch('/api/purchase-orders/$id/approve', {'approved_by': approvedBy});
+    return data as Map<String, dynamic>;
+  }
+
   // ── Yield Config ────────────────────────────────────────────
 
   Future<List<YieldConfig>> getYieldConfigs() async {
@@ -338,5 +391,17 @@ class ApiService {
 
   Future<void> deleteYieldConfig(String id) async {
     await _delete('/api/yield/$id');
+  }
+
+  // ── Business Settings ───────────────────────────────────────
+
+  Future<Map<String, String>> getSettings() async {
+    final data = await _get('/api/settings');
+    return (data as Map<String, dynamic>)
+        .map((k, v) => MapEntry(k, v.toString()));
+  }
+
+  Future<void> updateSettings(Map<String, String> updates) async {
+    await _patch('/api/settings', updates);
   }
 }

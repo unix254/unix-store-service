@@ -215,13 +215,15 @@ router.put('/:id', async (req, res) => {
 });
 
 // PATCH /api/inventory/:id/adjust  – adjust stock quantity
-// body: { delta: number, reason?: string, new_cost_per_unit?: number, changed_by?: string }
-// If new_cost_per_unit is provided AND different from current, logs to unix_cost_history.
+// body: { delta, reason?, new_cost_per_unit?, changed_by?, supplier_id?, total_cost? }
+// • If new_cost_per_unit differs from current cost, logs to unix_cost_history.
+// • If delta > 0 AND supplier_id + total_cost provided (delivery), automatically posts a
+//   PURCHASE entry to unix_supplier_ledger so the debt is linked on the spot.
 router.patch('/:id/adjust', async (req, res) => {
-  const { delta, reason, new_cost_per_unit, changed_by } = req.body;
+  const { delta, reason, new_cost_per_unit, changed_by, supplier_id, total_cost } = req.body;
   if (delta === undefined) return res.status(400).json({ error: 'delta is required' });
   try {
-    // Fetch current item to compare cost
+    // Fetch current item
     const current = await query(
       'SELECT cost_per_unit FROM unix_store_inventory WHERE id = ?',
       [req.params.id]
@@ -253,6 +255,21 @@ router.patch('/:id/adjust', async (req, res) => {
          SET quantity_in_stock = quantity_in_stock + ?
          WHERE id = ?`,
         [delta, req.params.id]
+      );
+    }
+
+    // ── Link delivery to supplier ledger ────────────────────────────────────
+    // When a positive delivery is tagged with a supplier + invoice cost,
+    // automatically post a PURCHASE transaction to increase the supplier's debt.
+    if (Number(delta) > 0 && supplier_id && total_cost && Number(total_cost) > 0) {
+      const desc = reason && reason.trim()
+        ? `Stock delivery — ${reason.trim()}`
+        : 'Stock delivery (auto-linked from inventory receive)';
+      await query(
+        `INSERT INTO unix_supplier_ledger
+           (id, supplier_id, transaction_type, amount, description, transaction_date)
+         VALUES (?, ?, 'PURCHASE', ?, ?, CURDATE())`,
+        [uuidv4(), supplier_id, Number(total_cost), desc]
       );
     }
 

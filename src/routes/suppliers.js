@@ -162,31 +162,54 @@ router.post('/:id/order', async (req, res) => {
       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
     });
 
-    const itemLines = items
-      .map(it => `  • ${it.quantity} ${it.unit} – ${it.name}`)
-      .join('\n');
+    const emojiGreen = String.fromCodePoint(0x1F7E2);   // 🟢
+    const emojiDate = String.fromCodePoint(0x1F4C5);    // 📅
+    const emojiDiamond = String.fromCodePoint(0x1F539); // 🔹
 
-    const storeUrl = process.env.PUBLIC_URL || 'https://store-dev.unixpos.com';
+    const itemLines = items
+      .map(it => `  ${emojiDiamond} ${it.quantity} ${it.unit} – ${it.name}`)
+      .join('\r\n');
+
+    const settingsRows = await query(`SELECT setting_key, setting_value FROM unix_settings WHERE setting_key IN ('business_name', 'slogan')`);
+    const settingsMap = {};
+    settingsRows.forEach(r => settingsMap[r.setting_key] = r.setting_value);
+    const busName = settingsMap['business_name'] || 'Yunix Store';
+    const slogan = settingsMap['slogan'] || 'Powered by Yunix';
 
     const message = [
-      `*ORDER REQUEST – Yunix Store*`,
-      `Date: ${today}`,
+      `${emojiGreen} *NEW ORDER REQUEST: ${busName}* | ${emojiDate} ${today}`,
       ``,
-      `Hello *${supplier.name}*,`,
-      `Please prepare the following order:`,
+      `Hi *${supplier.name}*, `,
+      `Please prepare the following items for delivery:`,
       ``,
       itemLines,
-      note ? `\nNote: ${note}` : '',
       ``,
-      `Kindly confirm availability and delivery time.`,
-      `Thank you.`,
+      note ? `Note: ${note}` : null,
+      `Kindly reply to confirm availability and expected delivery time. Thank you!`,
       ``,
-      `_Sent via Yunix Store Controller_`,
-      `_${storeUrl}_`
-    ].filter(l => l !== undefined).join('\n');
+      `*${busName}*`,
+      `_${slogan}_`
+    ].filter(l => l !== null && l !== undefined).join('\r\n');
 
-    const whatsappUrl = supplier.phone
-      ? `https://wa.me/${supplier.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`
+    // Force strict %0D%0A (CRLF) encoding for Windows Desktop WhatsApp protocol handler
+    // This physically prevents Windows from eating the line breaks when routing the URI.
+    const encodedMessage = encodeURIComponent(message)
+        .replace(/%0A/g, '%0D%0A')
+        .replace(/%0D%0D%0A/g, '%0D%0A');
+
+    let cleanPhone = supplier.phone ? supplier.phone.replace(/[^0-9]/g, '') : '';
+    
+    // Format to Kenyan international code (254) if missing
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '254' + cleanPhone.substring(1);
+    } else if (cleanPhone.length === 9) {
+      cleanPhone = '254' + cleanPhone;
+    }
+
+    // Switch back to api.whatsapp.com/send because it reliably resolved the phone number
+    // in the earlier versions. We include the %0D%0A fix from before.
+    const whatsappUrl = cleanPhone
+      ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMessage}`
       : null;
 
     res.json({
