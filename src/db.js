@@ -21,22 +21,45 @@ async function query(sql, params) {
 
 /**
  * Run all SQL migration files from /migrations in order.
- * Uses CREATE TABLE IF NOT EXISTS so it is safe to run on every startup.
+ * Tracks completed migrations in unix_migrations table — each file runs exactly once.
  */
 async function runMigrations() {
   const migrationsDir = path.join(__dirname, '..', 'migrations');
   const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
 
-  for (const file of files) {
-    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
-    console.log(`[db] Running migration: ${file}`);
-    const conn = await pool.getConnection();
-    try {
-      await conn.query(sql);
-      console.log(`[db] Migration OK: ${file}`);
-    } finally {
-      conn.release();
+  const conn = await pool.getConnection();
+  try {
+    // Create migration tracking table if it doesn't exist
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS unix_migrations (
+        filename     VARCHAR(255) NOT NULL PRIMARY KEY,
+        applied_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Fetch already-applied migrations
+    const [applied] = await conn.query('SELECT filename FROM unix_migrations');
+    const appliedSet = new Set(applied.map(r => r.filename));
+
+    for (const file of files) {
+      if (appliedSet.has(file)) {
+        console.log(`[db] Skipping (already applied): ${file}`);
+        continue;
+      }
+
+      const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+      console.log(`[db] Running migration: ${file}`);
+      try {
+        await conn.query(sql);
+        await conn.query('INSERT INTO unix_migrations (filename) VALUES (?)', [file]);
+        console.log(`[db] Migration OK: ${file}`);
+      } catch (err) {
+        console.error(`[db] Migration FAILED: ${file} — ${err.message}`);
+        throw err; // halt startup on migration failure
+      }
     }
+  } finally {
+    conn.release();
   }
 }
 
