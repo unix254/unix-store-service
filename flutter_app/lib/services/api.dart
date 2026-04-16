@@ -9,6 +9,7 @@ import '../models/inventory_item.dart';
 import '../models/requisition.dart';
 import '../models/pos_product.dart';
 import '../models/yield_config.dart';
+import '../models/feature_flag.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -126,12 +127,39 @@ class ApiService {
     return data['id'] as String;
   }
 
+  /// Phase 7: Record a Cash-In (bank withdrawal / float top-up) on an internal supplier's ledger.
+  Future<String> recordCashIn(
+    String supplierId, {
+    required double amount,
+    required String transactionDate,
+    String? description,
+    String? referenceDoc,
+  }) async {
+    return addLedgerEntry(supplierId, {
+      'transaction_type': 'CASH_IN',
+      'amount':           amount,
+      'transaction_date': transactionDate,
+      if (description != null && description.isNotEmpty) 'description': description,
+      if (referenceDoc != null && referenceDoc.isNotEmpty) 'reference_doc': referenceDoc,
+    });
+  }
+
   Future<Map<String, dynamic>> getOrderMessage(
       String supplierId, List<Map<String, dynamic>> items, {String? note}) async {
     final data = await _post('/api/suppliers/$supplierId/order', {
       'items': items,
       if (note != null && note.isNotEmpty) 'note': note,
     });
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getSupplierStatement(String supplierId, {int days = 30}) async {
+    final data = await _get('/api/suppliers/$supplierId/statement?days=$days');
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getSupplierStatementWhatsApp(String supplierId, {int days = 30}) async {
+    final data = await _get('/api/suppliers/$supplierId/statement/whatsapp?days=$days');
     return data as Map<String, dynamic>;
   }
 
@@ -221,12 +249,26 @@ class ApiService {
     return data['id'] as String;
   }
 
-  Future<void> issueRequisition(String id, String issuedBy) async {
-    await _patch('/api/requisitions/$id/issue', {'issued_by': issuedBy});
+  /// Phase 8: [issuedQuantity] lets the storekeeper issue a partial/adjusted amount.
+  /// [issueNotes] explains the adjustment to the requester.
+  Future<void> issueRequisition(
+    String id,
+    String issuedBy, {
+    double? issuedQuantity,
+    String? issueNotes,
+  }) async {
+    await _patch('/api/requisitions/$id/issue', {
+      'issued_by': issuedBy,
+      if (issuedQuantity != null) 'issued_quantity': issuedQuantity,
+      if (issueNotes != null && issueNotes.isNotEmpty) 'issue_notes': issueNotes,
+    });
   }
 
-  Future<void> rejectRequisition(String id) async {
-    await _patch('/api/requisitions/$id/reject', {});
+  /// Phase 8: [reason] is stored as issue_notes so the requester sees why it was rejected.
+  Future<void> rejectRequisition(String id, {String? reason}) async {
+    await _patch('/api/requisitions/$id/reject', {
+      if (reason != null && reason.isNotEmpty) 'reject_reason': reason,
+    });
   }
 
   // ── POS (read-only) ─────────────────────────────────────────
@@ -321,8 +363,32 @@ class ApiService {
     await _patch('/api/pay-runs/$id/approve', {});
   }
 
+  /// Phase 7: Manager-led shortcut — transitions a Draft run directly to Approved,
+  /// bypassing the Submitted / owner-WhatsApp-approval step.
+  Future<void> finalizePayRun(String id) async {
+    await _patch('/api/pay-runs/$id/finalize', {});
+  }
+
   Future<Map<String, dynamic>> disbursePayRun(String id, String disbursedBy) async {
     final data = await _patch('/api/pay-runs/$id/disburse', {'disbursed_by': disbursedBy});
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> disbursePayRunDetail(
+    String runId,
+    String detailId, {
+    required String disbursedBy,
+    String? paymentSourceId,
+    String? paymentReference,
+  }) async {
+    final data = await _patch(
+      '/api/pay-runs/$runId/details/$detailId/disburse',
+      {
+        'disbursed_by': disbursedBy,
+        if (paymentSourceId != null) 'payment_source_supplier_id': paymentSourceId,
+        if (paymentReference != null) 'payment_reference': paymentReference,
+      },
+    );
     return data as Map<String, dynamic>;
   }
 
@@ -391,6 +457,67 @@ class ApiService {
 
   Future<void> deleteYieldConfig(String id) async {
     await _delete('/api/yield/$id');
+  }
+
+  // ── Procurement ─────────────────────────────────────────────
+
+  Future<List<Map<String, dynamic>>> getInternalSuppliers() async {
+    final data = await _get('/api/suppliers');
+    return (data as List)
+        .cast<Map<String, dynamic>>()
+        .where((s) => (s['is_internal'] as num?)?.toInt() == 1)
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> generateProcurement(String generatedBy) async {
+    final data = await _post('/api/procurement/generate', {'generated_by': generatedBy});
+    return data as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> getProcurementLogs() async {
+    final data = await _get('/api/procurement/logs');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  /// Phase 8: Build WhatsApp URLs from user-adjusted (or ad-hoc) procurement groups.
+  /// [groups] is a list of { purchaser_name, purchaser_phone, items: [{ name, unit, qty }] }.
+  Future<List<Map<String, dynamic>>> buildProcurementWhatsApp(
+      List<Map<String, dynamic>> groups) async {
+    final data = await _post('/api/procurement/build-whatsapp', {'groups': groups});
+    return ((data as Map<String, dynamic>)['groups'] as List)
+        .cast<Map<String, dynamic>>();
+  }
+
+  // ── Feature Flags ───────────────────────────────────────────
+
+  Future<List<FeatureFlag>> getFeatureFlags() async {
+    final data = await _get('/api/feature-flags');
+    return (data as List)
+        .map((e) => FeatureFlag.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> updateFeatureFlag(String key, bool enabled) async {
+    await _put('/api/feature-flags/$key', {'enabled': enabled});
+  }
+
+  // ── Super Admin ─────────────────────────────────────────────
+
+  /// Validates super admin credentials. Throws [ApiException] on failure.
+  Future<void> superAdminLogin(String username, String password) async {
+    await _post('/api/admin/super-login', {
+      'username': username,
+      'password': password,
+    });
+  }
+
+  /// Wipes all transactional unix_ tables. Credentials re-verified server-side.
+  Future<Map<String, dynamic>> goLiveWipe(String username, String password) async {
+    final data = await _post('/api/admin/go-live-wipe', {
+      'username': username,
+      'password': password,
+    });
+    return data as Map<String, dynamic>;
   }
 
   // ── Business Settings ───────────────────────────────────────

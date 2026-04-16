@@ -117,8 +117,8 @@ router.post('/:id/auto-populate', async (req, res) => {
     const debtors = await query(`
       SELECT
         s.id,
-        COALESCE(SUM(CASE WHEN l.transaction_type = 'PURCHASE' THEN l.amount ELSE 0 END), 0)
-          - COALESCE(SUM(CASE WHEN l.transaction_type = 'PAYMENT'  THEN l.amount ELSE 0 END), 0)
+        COALESCE(SUM(CASE WHEN l.transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT') THEN l.amount ELSE 0 END), 0)
+          - COALESCE(SUM(CASE WHEN l.transaction_type IN ('PAYMENT','CASH_IN') THEN l.amount ELSE 0 END), 0)
           AS balance_due
       FROM unix_suppliers s
       LEFT JOIN unix_supplier_ledger l ON l.supplier_id = s.id
@@ -241,12 +241,38 @@ router.patch('/:id/approve', async (req, res) => {
   }
 });
 
-// PATCH /api/pay-runs/:id/disburse
-// Marks run as Disbursed, marks included details as Paid,
-// and zeroes out the approved_amount from each supplier's ledger balance
-// by inserting PAYMENT ledger entries.
-router.patch('/:id/disburse', async (req, res) => {
-  const { disbursed_by } = req.body;
+// PATCH /api/pay-runs/:id/finalize
+// Manager-led shortcut: transition a Draft run directly to Approved,
+// bypassing the Submitted / owner-WhatsApp-approval step entirely.
+// Phase 7: pay run ownership is now fully with Managers.
+router.patch('/:id/finalize', async (req, res) => {
+  try {
+    const result = await query(
+      `UPDATE unix_pay_runs SET status = 'Approved' WHERE id = ? AND status = 'Draft'`,
+      [req.params.id]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(400).json({ error: 'Pay run must be in Draft status to finalize' });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/pay-runs/:id/details/:detailId/disburse
+// Disburses a single supplier row within an Approved pay run.
+// Body: { disbursed_by, payment_source_supplier_id?, payment_reference? }
+//
+// Double-entry when payment_source_supplier_id (internal supplier) is provided:
+//   1. PAYMENT on external supplier ledger      → reduces their debt
+//   2. SUPPLIER_PAYMENT on internal supplier ledger → records manager cash used
+//      (distinct from PURCHASE which is ad-hoc petty cash buys by the manager)
+//
+// After all Included details are Paid, the run is auto-marked Disbursed.
+router.patch('/:id/details/:detailId/disburse', async (req, res) => {
+  const { disbursed_by, payment_source_supplier_id, payment_reference } = req.body;
   try {
     const run = await query('SELECT * FROM unix_pay_runs WHERE id = ?', [req.params.id]);
     if (!run.length) return res.status(404).json({ error: 'Pay run not found' });
@@ -255,39 +281,84 @@ router.patch('/:id/disburse', async (req, res) => {
     }
 
     const details = await query(
-      `SELECT d.*, s.name AS supplier_name
+      `SELECT d.*, s.name AS supplier_name, s.id AS supplier_id_ref
        FROM unix_pay_run_details d
        JOIN unix_suppliers s ON s.id = d.supplier_id
-       WHERE d.pay_run_id = ? AND d.status = 'Included'`,
-      [req.params.id]
+       WHERE d.id = ? AND d.pay_run_id = ?`,
+      [req.params.detailId, req.params.id]
     );
+    if (!details.length) return res.status(404).json({ error: 'Detail not found' });
+    const d = details[0];
+    if (d.status === 'Paid') return res.status(400).json({ error: 'Already disbursed' });
+    if (d.status !== 'Included') return res.status(400).json({ error: 'Only Included rows can be disbursed' });
+
+    // Validate payment source is an internal supplier if provided
+    if (payment_source_supplier_id) {
+      const src = await query(
+        'SELECT id, name, is_internal FROM unix_suppliers WHERE id = ?',
+        [payment_source_supplier_id]
+      );
+      if (!src.length) return res.status(400).json({ error: 'Payment source supplier not found' });
+      if (!src[0].is_internal) return res.status(400).json({ error: 'Payment source must be an internal expense account' });
+    }
+
+    // Load business name for description context
+    const settingsRows = await query(
+      `SELECT setting_value FROM unix_settings WHERE setting_key = 'business_name' LIMIT 1`
+    );
+    const busName = settingsRows.length ? settingsRows[0].setting_value : 'Store';
 
     const today = new Date().toISOString().slice(0, 10);
+    const ref   = payment_reference ? ` (Ref: ${payment_reference})` : '';
+    const by    = disbursed_by ? ` by ${disbursed_by}` : '';
 
-    for (const d of details) {
-      // Post a PAYMENT to the supplier ledger
+    // 1. PAYMENT on external supplier ledger
+    await query(
+      `INSERT INTO unix_supplier_ledger
+         (id, supplier_id, transaction_type, amount, description, reference_doc, transaction_date)
+       VALUES (?, ?, 'PAYMENT', ?, ?, ?, ?)`,
+      [uuidv4(), d.supplier_id, d.approved_amount,
+       `Pay Run payment${by}${ref}`,
+       payment_reference || null, today]
+    );
+
+    // 2. Double-entry: SUPPLIER_PAYMENT on internal supplier ledger
+    //    This is distinct from PURCHASE (ad-hoc cash buy). It shows the manager
+    //    acted as a payment intermediary for a prequalified external supplier.
+    if (payment_source_supplier_id) {
       await query(
         `INSERT INTO unix_supplier_ledger
-           (id, supplier_id, transaction_type, amount, description, transaction_date)
-         VALUES (?, ?, 'PAYMENT', ?, ?, ?)`,
-        [uuidv4(), d.supplier_id, d.approved_amount,
-         `Pay Run disbursement${disbursed_by ? ' by ' + disbursed_by : ''}`,
-         today]
-      );
-      // Mark detail as Paid
-      await query(
-        `UPDATE unix_pay_run_details SET status = 'Paid' WHERE id = ?`,
-        [d.id]
+           (id, supplier_id, transaction_type, amount, description, reference_doc, transaction_date, related_supplier_id)
+         VALUES (?, ?, 'SUPPLIER_PAYMENT', ?, ?, ?, ?, ?)`,
+        [uuidv4(), payment_source_supplier_id, d.approved_amount,
+         `Supplier Payment on behalf of ${busName} – Paid to ${d.supplier_name}${ref}`,
+         payment_reference || null, today,
+         d.supplier_id]   // link back to the external supplier
       );
     }
 
+    // Mark detail as Paid
     await query(
-      `UPDATE unix_pay_runs SET status = 'Disbursed' WHERE id = ?`,
+      `UPDATE unix_pay_run_details
+       SET status = 'Paid', disbursed_by = ?, disbursed_at = NOW(),
+           payment_source_id = ?, payment_reference = ?
+       WHERE id = ?`,
+      [disbursed_by || null, payment_source_supplier_id || null,
+       payment_reference || null, d.id]
+    );
+
+    // Auto-close run if all Included rows are now Paid
+    const remaining = await query(
+      `SELECT COUNT(*) AS cnt FROM unix_pay_run_details
+       WHERE pay_run_id = ? AND status = 'Included'`,
       [req.params.id]
     );
+    if (Number(remaining[0].cnt) === 0) {
+      await query(`UPDATE unix_pay_runs SET status = 'Disbursed' WHERE id = ?`, [req.params.id]);
+    }
     await recalcTotals(req.params.id);
 
-    res.json({ ok: true, suppliers_paid: details.length });
+    res.json({ ok: true, run_closed: Number(remaining[0].cnt) === 0 });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });

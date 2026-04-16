@@ -3,7 +3,7 @@ import '../../config/theme.dart';
 import '../../models/staff_member.dart';
 import '../../services/api.dart';
 
-const _kLocations = ['Kitchen', 'Rooftop', 'Barista', 'Main Hall', 'Prep Room', 'Office'];
+const _kLocations = ['Kitchen', 'Rooftop', 'Barista', 'Main Hall', 'Prep Room', 'Office', 'Cleaning Staff'];
 
 /// Manager-only screen for adding, editing, and deactivating staff PINs.
 class StaffManagementScreen extends StatefulWidget {
@@ -138,7 +138,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
   Widget build(BuildContext context) {
     // Group by role order: owner → manager → store → kitchen
     final sorted = [..._staff]..sort((a, b) {
-      const order = {'owner': 0, 'manager': 1, 'store': 2, 'kitchen': 3};
+      const order = {'owner': 0, 'manager': 1, 'store': 2, 'kitchen': 3, 'ict_admin': 4};
       final cmp = (order[a.role] ?? 9).compareTo(order[b.role] ?? 9);
       return cmp != 0 ? cmp : a.name.compareTo(b.name);
     });
@@ -240,10 +240,11 @@ class _StaffCard extends StatelessWidget {
   });
 
   static const _roleColors = {
-    'owner':   Color(0xFF1565C0),
-    'manager': Color(0xFF7B1FA2),
-    'store':   AppTheme.pinTeal,
-    'kitchen': Color(0xFFF57C00),
+    'owner':     Color(0xFF1565C0),
+    'manager':   Color(0xFF7B1FA2),
+    'store':     AppTheme.pinTeal,
+    'kitchen':   Color(0xFFF57C00),
+    'ict_admin': Color(0xFF0097A7),
   };
 
   @override
@@ -521,10 +522,11 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
               Row(
                 children: [
                   for (final (r, label) in [
-                    ('kitchen', '🍳 Kitchen'),
-                    ('store',   '📦 Store'),
-                    ('manager','👔 Manager'),
-                    ('owner',  '👑 Owner'),
+                    ('kitchen',   '🍳 Kitchen'),
+                    ('store',     '📦 Store'),
+                    ('manager',   '👔 Manager'),
+                    ('owner',     '👑 Owner'),
+                    ('ict_admin', '💻 ICT Admin'),
                   ])
                     Expanded(
                       child: Padding(

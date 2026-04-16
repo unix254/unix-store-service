@@ -82,9 +82,13 @@ router.post('/', async (req, res) => {
 });
 
 // PATCH /api/requisitions/:id/issue
-// Store keeper issues (approves + deducts stock) in one action
+// Store keeper issues (approves + deducts stock) in one action.
+// Body: { issued_by, issued_quantity?, issue_notes? }
+//   issued_quantity: optional override — allows issuing less (or more) than requested.
+//                   If omitted, the full requested quantity is used.
+//   issue_notes:    optional reason/explanation (e.g. "Only 2kg left in store").
 router.patch('/:id/issue', async (req, res) => {
-  const { issued_by } = req.body;
+  const { issued_by, issued_quantity, issue_notes } = req.body;
   if (!issued_by) return res.status(400).json({ error: 'issued_by is required' });
 
   const conn = (await require('../db').pool.getConnection());
@@ -104,34 +108,47 @@ router.patch('/:id/issue', async (req, res) => {
       return res.status(409).json({ error: `Cannot issue a requisition with status '${req_row.status}'` });
     }
 
+    // Resolve the actual quantity to deduct (override or full request)
+    const qtyToIssue = issued_quantity != null
+      ? Number(issued_quantity)
+      : Number(req_row.quantity);
+
+    if (qtyToIssue <= 0) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'issued_quantity must be greater than zero' });
+    }
+
     // Check available stock
     const [[item]] = await conn.execute(
       'SELECT quantity_in_stock FROM unix_store_inventory WHERE id = ?',
       [req_row.inventory_item_id]
     );
-    if (Number(item.quantity_in_stock) < Number(req_row.quantity)) {
+    if (Number(item.quantity_in_stock) < qtyToIssue) {
       await conn.rollback();
       return res.status(409).json({
         error: 'Insufficient stock',
         available: item.quantity_in_stock,
-        requested: req_row.quantity
+        requested: qtyToIssue
       });
     }
 
     // Deduct stock
     await conn.execute(
       'UPDATE unix_store_inventory SET quantity_in_stock = quantity_in_stock - ? WHERE id = ?',
-      [req_row.quantity, req_row.inventory_item_id]
+      [qtyToIssue, req_row.inventory_item_id]
     );
 
-    // Mark requisition as Issued
+    // Mark requisition as Issued, saving the actual issued quantity and any notes
     await conn.execute(
-      `UPDATE unix_requisitions SET status='Issued', issued_by=?, issued_at=NOW() WHERE id=?`,
-      [issued_by, req.params.id]
+      `UPDATE unix_requisitions
+         SET status='Issued', issued_by=?, issued_at=NOW(),
+             issued_quantity=?, issue_notes=?
+       WHERE id=?`,
+      [issued_by, qtyToIssue, issue_notes || null, req.params.id]
     );
 
     await conn.commit();
-    res.json({ ok: true });
+    res.json({ ok: true, issued_quantity: qtyToIssue });
   } catch (err) {
     await conn.rollback();
     console.error(err);
@@ -142,11 +159,14 @@ router.patch('/:id/issue', async (req, res) => {
 });
 
 // PATCH /api/requisitions/:id/reject
+// Body: { reject_reason? }  – optional explanation stored in issue_notes.
 router.patch('/:id/reject', async (req, res) => {
+  const { reject_reason } = req.body;
   try {
     await query(
-      `UPDATE unix_requisitions SET status='Rejected' WHERE id=? AND status='Pending'`,
-      [req.params.id]
+      `UPDATE unix_requisitions SET status='Rejected', issue_notes=?
+       WHERE id=? AND status='Pending'`,
+      [reject_reason || null, req.params.id]
     );
     res.json({ ok: true });
   } catch (err) {

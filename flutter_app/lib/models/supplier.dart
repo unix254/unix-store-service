@@ -7,6 +7,7 @@ class Supplier {
   final int leadTimeDays;
   final String? notes;
   final double balanceDue;
+  final bool isInternal;
 
   const Supplier({
     required this.id,
@@ -17,6 +18,7 @@ class Supplier {
     this.leadTimeDays = 1,
     this.notes,
     this.balanceDue = 0,
+    this.isInternal = false,
   });
 
   factory Supplier.fromJson(Map<String, dynamic> j) => Supplier(
@@ -28,6 +30,7 @@ class Supplier {
         leadTimeDays: (j['lead_time_days'] as num?)?.toInt() ?? 1,
         notes:        j['notes'] as String?,
         balanceDue:   double.tryParse(j['balance_due']?.toString() ?? '0') ?? 0,
+        isInternal:   (j['is_internal'] as num?)?.toInt() == 1,
       );
 
   Map<String, dynamic> toJson() => {
@@ -37,5 +40,6 @@ class Supplier {
         'payment_day':    paymentDay,
         'lead_time_days': leadTimeDays,
         'notes':          notes,
+        'is_internal':    isInternal,
       };
 }

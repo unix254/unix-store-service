@@ -3,7 +3,7 @@
 class StaffMember {
   final String id;
   final String name;
-  final String role; // 'kitchen' | 'store' | 'manager'
+  final String role; // 'kitchen' | 'store' | 'manager' | 'owner' | 'ict_admin'
   final bool active;
   final List<String> capabilities;
   final String? locationName;
@@ -37,36 +37,61 @@ class StaffMember {
   }
 
   String get roleLabel => switch (role) {
-        'owner'   => 'Owner',
-        'manager' => 'Manager',
-        'store'   => 'Store Keeper',
-        'kitchen' => 'Kitchen Staff',
-        _         => role,
+        'owner'     => 'Owner',
+        'manager'   => 'Manager',
+        'store'     => 'Store Keeper',
+        'kitchen'   => 'Kitchen Staff',
+        'ict_admin' => 'ICT Admin',
+        _           => role,
       };
 
-  bool get isManager => role == 'manager';
+  bool get isManager  => role == 'manager';
+  bool get isIctAdmin => role == 'ict_admin';
   bool hasCapability(String cap) => capabilities.contains(cap);
 }
 
-/// All available capabilities with their display labels
+/// All available capabilities with their display labels.
 const kAllCapabilities = <(String, String)>[
-  ('can_approve_requisitions', 'Approve Requisitions'),
-  ('can_manage_inventory',     'Manage Inventory'),
-  ('can_draft_po',             'Draft Purchase Orders'),
-  ('can_approve_payrun',       'Approve Pay Runs'),
-  ('can_log_waste',            'Log Waste/Spoilage'),
-  ('can_manage_staff',         'Manage Staff'),
-  ('can_view_variance',        'View Variance Dashboard'),
-  ('can_manage_settings',      'Manage System Settings'),
+  // ── Core operations ─────────────────────────────────────────
+  ('can_approve_requisitions',    'Approve Requisitions'),
+  ('can_manage_inventory',        'Manage Inventory'),
+  ('can_delete_inventory',        'Delete Inventory Item'),
+  ('can_draft_po',                'Draft Purchase Orders'),
+  ('can_approve_payrun',          'Approve Pay Runs'),
+  ('can_log_waste',               'Log Waste / Spoilage'),
+  ('can_manage_staff',            'Manage Staff'),
+  ('can_view_variance',           'View Variance Dashboard'),
+  ('can_manage_settings',         'Manage System Settings'),
+  // ── New capabilities (Phase 10) ──────────────────────────────
+  ('can_manage_yield_config',     'Manage Yield Config'),
+  ('can_manage_procurement',      'Manage Procurement'),
+  ('can_manage_expense_accounts', 'Manage Expense Accounts'),
 ];
 
-/// Default capabilities seeded per role
+/// Default capabilities seeded per role when a new staff member is created.
 List<String> defaultCapabilities(String role) => switch (role) {
-      'kitchen' => ['can_log_waste'],
-      'store'   => ['can_approve_requisitions', 'can_manage_inventory', 'can_draft_po', 'can_view_variance'],
-      'manager' => ['can_approve_requisitions', 'can_manage_inventory', 'can_draft_po',
-                    'can_approve_payrun', 'can_log_waste', 'can_manage_staff', 'can_view_variance',
-                    'can_manage_settings'],
-      'owner'   => kAllCapabilities.map((e) => e.$1).toList(),
-      _         => [],
+      'kitchen'   => ['can_log_waste'],
+      'store'     => [
+                       'can_approve_requisitions',
+                       'can_manage_inventory',
+                       'can_draft_po',
+                       'can_view_variance',
+                     ],
+      'manager'   => [
+                       'can_approve_requisitions',
+                       'can_manage_inventory',
+                       'can_delete_inventory',
+                       'can_draft_po',
+                       'can_approve_payrun',
+                       'can_log_waste',
+                       'can_manage_staff',
+                       'can_view_variance',
+                       'can_manage_settings',
+                       'can_manage_yield_config',
+                       'can_manage_procurement',
+                       'can_manage_expense_accounts',
+                     ],
+      'owner'     => kAllCapabilities.map((e) => e.$1).toList(),
+      'ict_admin' => ['can_manage_settings'],
+      _           => [],
     };

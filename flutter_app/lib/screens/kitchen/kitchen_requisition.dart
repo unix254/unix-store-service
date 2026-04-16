@@ -185,51 +185,53 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
           Text('Log Wastage / Spoilage',
               style: TextStyle(color: Colors.white, fontSize: 16)),
         ]),
-        content: SizedBox(
-          width: 340,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Item: ${_picked!.name}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 14)),
-              const SizedBox(height: 12),
-              TextField(
-                controller: qtyCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: const Color(0xFF0F1923),
-                  labelText: 'Wasted Quantity (${_picked!.unitOfMeasure})',
-                  labelStyle: const TextStyle(color: Colors.white54),
-                  enabledBorder: const OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24)),
-                  focusedBorder: const OutlineInputBorder(
-                      borderSide: BorderSide(color: Color(0xFFEF5350))),
+        content: SingleChildScrollView(
+          child: SizedBox(
+            width: 340,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Item: ${_picked!.name}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 14)),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: qtyCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: const Color(0xFF0F1923),
+                    labelText: 'Wasted Quantity (${_picked!.unitOfMeasure})',
+                    labelStyle: const TextStyle(color: Colors.white54),
+                    enabledBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white24)),
+                    focusedBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(color: Color(0xFFEF5350))),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: notesCtrl,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  filled: true,
-                  fillColor: Color(0xFF0F1923),
-                  labelText: 'Reason (optional)',
-                  labelStyle: TextStyle(color: Colors.white54),
-                  enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24)),
-                  focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Color(0xFFEF5350))),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: notesCtrl,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    filled: true,
+                    fillColor: Color(0xFF0F1923),
+                    labelText: 'Reason (optional)',
+                    labelStyle: TextStyle(color: Colors.white54),
+                    enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white24)),
+                    focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Color(0xFFEF5350))),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                '⚠️  Waste is logged immediately. No approval needed. Stock will be deducted.',
-                style: TextStyle(color: Colors.orange, fontSize: 11),
-              ),
-            ],
+                const SizedBox(height: 12),
+                const Text(
+                  '⚠️  Waste is logged immediately. No approval needed. Stock will be deducted.',
+                  style: TextStyle(color: Colors.orange, fontSize: 11),
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
@@ -277,46 +279,77 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
     }
   }
 
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  void _logOut() {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const PinLoginScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F1923),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _Header(staff: widget.staff, onLogWaste: _logWaste),
-            Expanded(
-              child: _loadingItems
-                  ? const Center(
-                      child: CircularProgressIndicator(color: AppTheme.pinTeal))
-                  : _items.isEmpty
-                      ? const _EmptyInventory()
-                      : _Body(
-                          items:              _items,
-                          picked:             _picked,
-                          qty:                _qty,
-                          purpose:            _purpose,
-                          notesCtrl:          _notesCtrl,
-                          submitting:         _submitting,
-                          submitError:        _submitError,
-                          myRequests:         _myRequests,
-                          loadingReqs:        _loadingRequests,
-                          search:             _search,
-                          basket:             _basket,
-                          onSelect:           _selectItem,
-                          onAdjustQty:        _adjustQty,
-                          onEditQty:          _editQtyDirect,
-                          onPurpose:          (p) => setState(() => _purpose = p),
-                          onAddToBasket:      _addToBasket,
-                          onRemoveFromBasket: _removeFromBasket,
-                          onSubmit:           _submit,
-                          onRefreshReqs:      _loadMyRequests,
-                          onSearch:           (v) => setState(() => _search = v),
-                        ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 800;
+        return Scaffold(
+          key: _scaffoldKey,
+          backgroundColor: const Color(0xFF0F1923),
+          drawer: isMobile
+              ? _MenuDrawer(
+                  staff: widget.staff,
+                  onLogWaste: _logWaste,
+                  onLogOut: _logOut,
+                  requests: _myRequests,
+                  loading: _loadingRequests,
+                  onRefresh: _loadMyRequests,
+                )
+              : null,
+          body: SafeArea(
+            child: Column(
+              children: [
+                _Header(
+                  staff: widget.staff,
+                  onLogWaste: _logWaste,
+                  onLogOut: _logOut,
+                  isMobile: isMobile,
+                  onMenuTap: () => _scaffoldKey.currentState?.openDrawer(),
+                ),
+                Expanded(
+                  child: _loadingItems
+                      ? const Center(
+                          child: CircularProgressIndicator(color: AppTheme.pinTeal))
+                      : _items.isEmpty
+                          ? const _EmptyInventory()
+                          : _Body(
+                              items:              _items,
+                              picked:             _picked,
+                              qty:                _qty,
+                              purpose:            _purpose,
+                              notesCtrl:          _notesCtrl,
+                              submitting:         _submitting,
+                              submitError:        _submitError,
+                              myRequests:         _myRequests,
+                              loadingReqs:        _loadingRequests,
+                              search:             _search,
+                              basket:             _basket,
+                              isMobile:           isMobile,
+                              onSelect:           _selectItem,
+                              onAdjustQty:        _adjustQty,
+                              onEditQty:          _editQtyDirect,
+                              onPurpose:          (p) => setState(() => _purpose = p),
+                              onAddToBasket:      _addToBasket,
+                              onRemoveFromBasket: _removeFromBasket,
+                              onSubmit:           _submit,
+                              onRefreshReqs:      _loadMyRequests,
+                              onSearch:           (v) => setState(() => _search = v),
+                            ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }
@@ -328,67 +361,87 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
 class _Header extends StatelessWidget {
   final Staff staff;
   final VoidCallback onLogWaste;
-  const _Header({required this.staff, required this.onLogWaste});
+  final VoidCallback onLogOut;
+  final bool isMobile;
+  final VoidCallback onMenuTap;
+
+  const _Header({
+    required this.staff,
+    required this.onLogWaste,
+    required this.onLogOut,
+    required this.isMobile,
+    required this.onMenuTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       color: const Color(0xFF0D1B26),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+      padding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 24, vertical: 14),
       child: Row(
         children: [
-          const Icon(Icons.restaurant_menu_rounded,
-              color: AppTheme.pinTeal, size: 28),
-          const SizedBox(width: 12),
-          const Text('KITCHEN REQUESTS',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 2,
-              )),
-          const Spacer(),
-          OutlinedButton.icon(
-            onPressed: onLogWaste,
-            icon: const Icon(Icons.delete_rounded, size: 16,
-                color: Color(0xFFEF9A9A)),
-            label: const Text('Log Waste',
-                style: TextStyle(color: Color(0xFFEF9A9A), fontSize: 13)),
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: Color(0xFFEF5350)),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          if (isMobile) ...[
+            IconButton(
+              icon: const Icon(Icons.menu_rounded, color: Colors.white),
+              onPressed: onMenuTap,
             ),
-          ),
-          const SizedBox(width: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.person_rounded,
-                    color: AppTheme.pinMuted, size: 16),
-                const SizedBox(width: 6),
-                Text(staff.name,
+            const SizedBox(width: 4),
+          ] else ...[
+            const Icon(Icons.restaurant_menu_rounded, color: AppTheme.pinTeal, size: 28),
+            const SizedBox(width: 12),
+          ],
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Row(
+                children: [
+                  Text(
+                    '${(staff.locationName?.isNotEmpty == true ? staff.locationName! : 'STOCK').toUpperCase()} REQUESTS',
                     style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600)),
-              ],
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  OutlinedButton.icon(
+                    onPressed: onLogWaste,
+                    icon: const Icon(Icons.delete_rounded, size: 16, color: Color(0xFFEF9A9A)),
+                    label: const Text('Log Waste', style: TextStyle(color: Color(0xFFEF9A9A), fontSize: 13)),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Color(0xFFEF5350)),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          const SizedBox(width: 12),
-          TextButton.icon(
-            onPressed: () => Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const PinLoginScreen()),
+          if (!isMobile) ...[
+            const SizedBox(width: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.person_rounded, color: AppTheme.pinMuted, size: 16),
+                  const SizedBox(width: 6),
+                  Text(staff.name, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                ],
+              ),
             ),
-            icon: const Icon(Icons.logout_rounded,
-                color: AppTheme.pinMuted, size: 18),
-            label: const Text('Log Out',
-                style: TextStyle(color: AppTheme.pinMuted, fontSize: 13)),
-          ),
+            const SizedBox(width: 12),
+            TextButton.icon(
+              onPressed: onLogOut,
+              icon: const Icon(Icons.logout_rounded, color: AppTheme.pinMuted, size: 18),
+              label: const Text('Log Out', style: TextStyle(color: AppTheme.pinMuted, fontSize: 13)),
+            ),
+          ],
         ],
       ),
     );
@@ -411,6 +464,7 @@ class _Body extends StatelessWidget {
   final bool loadingReqs;
   final String search;
   final List<_BasketItem> basket;
+  final bool isMobile;
   final void Function(InventoryItem) onSelect;
   final void Function(double) onAdjustQty;
   final VoidCallback onEditQty;
@@ -433,6 +487,7 @@ class _Body extends StatelessWidget {
     required this.loadingReqs,
     required this.search,
     required this.basket,
+    required this.isMobile,
     required this.onSelect,
     required this.onAdjustQty,
     required this.onEditQty,
@@ -446,62 +501,43 @@ class _Body extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isMobile = constraints.maxWidth < 800;
+    final form = _RequestForm(
+      items:              items,
+      picked:             picked,
+      qty:                qty,
+      purpose:            purpose,
+      notesCtrl:          notesCtrl,
+      submitting:         submitting,
+      submitError:        submitError,
+      search:             search,
+      basket:             basket,
+      onSelect:           onSelect,
+      onAdjustQty:        onAdjustQty,
+      onEditQty:          onEditQty,
+      onPurpose:          onPurpose,
+      onAddToBasket:      onAddToBasket,
+      onRemoveFromBasket: onRemoveFromBasket,
+      onSubmit:           onSubmit,
+      onSearch:           onSearch,
+    );
 
-        final form = _RequestForm(
-          items:              items,
-          picked:             picked,
-          qty:                qty,
-          purpose:            purpose,
-          notesCtrl:          notesCtrl,
-          submitting:         submitting,
-          submitError:        submitError,
-          search:             search,
-          basket:             basket,
-          onSelect:           onSelect,
-          onAdjustQty:        onAdjustQty,
-          onEditQty:          onEditQty,
-          onPurpose:          onPurpose,
-          onAddToBasket:      onAddToBasket,
-          onRemoveFromBasket: onRemoveFromBasket,
-          onSubmit:           onSubmit,
-          onSearch:           onSearch,
-        );
+    if (isMobile) {
+      return form;
+    }
 
-        if (isMobile) {
-          return Column(
-            children: [
-              Expanded(child: form),
-              const Divider(color: Color(0xFF263238), height: 1),
-              SizedBox(
-                height: 250,
-                child: _MyRequestsPanel(
-                  requests:  myRequests,
-                  loading:   loadingReqs,
-                  onRefresh: onRefreshReqs,
-                ),
-              ),
-            ],
-          );
-        }
-
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(flex: 3, child: form),
-            SizedBox(
-              width: 320,
-              child: _MyRequestsPanel(
-                requests:  myRequests,
-                loading:   loadingReqs,
-                onRefresh: onRefreshReqs,
-              ),
-            ),
-          ],
-        );
-      },
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(flex: 3, child: form),
+        SizedBox(
+          width: 320,
+          child: _MyRequestsPanel(
+            requests:  myRequests,
+            loading:   loadingReqs,
+            onRefresh: onRefreshReqs,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -877,56 +913,58 @@ class _QtyInputDialogState extends State<_QtyInputDialog> {
         'Enter Quantity (${widget.uom.toUpperCase()})',
         style: const TextStyle(color: Colors.white, fontSize: 16),
       ),
-      content: SizedBox(
-        width: 320,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Large text input
-            TextField(
-              controller: _ctrl,
-              autofocus: true,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 44,
-                  fontWeight: FontWeight.w800),
-              decoration: const InputDecoration(
-                filled: true,
-                fillColor: Color(0xFF0F1923),
-                enabledBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white24)),
-                focusedBorder: OutlineInputBorder(
-                    borderSide:
-                        BorderSide(color: AppTheme.pinTeal, width: 2)),
+      content: SingleChildScrollView(
+        child: SizedBox(
+          width: 320,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Large text input
+              TextField(
+                controller: _ctrl,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 44,
+                    fontWeight: FontWeight.w800),
+                decoration: const InputDecoration(
+                  filled: true,
+                  fillColor: Color(0xFF0F1923),
+                  enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white24)),
+                  focusedBorder: OutlineInputBorder(
+                      borderSide:
+                          BorderSide(color: AppTheme.pinTeal, width: 2)),
+                ),
+                onSubmitted: (_) => _confirm(),
               ),
-              onSubmitted: (_) => _confirm(),
-            ),
-            const SizedBox(height: 16),
-            // Quick-pick
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              alignment: WrapAlignment.center,
-              children: [5, 10, 25, 50, 100].map((v) {
-                return OutlinedButton(
-                  onPressed: () => _pick(v.toDouble()),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.pinTeal,
-                    side: const BorderSide(color: AppTheme.pinTeal),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                  ),
-                  child: Text('$v',
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w700)),
-                );
-              }).toList(),
-            ),
-          ],
+              const SizedBox(height: 16),
+              // Quick-pick
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: [5, 10, 25, 50, 100].map((v) {
+                  return OutlinedButton(
+                    onPressed: () => _pick(v.toDouble()),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.pinTeal,
+                      side: const BorderSide(color: AppTheme.pinTeal),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: Text('$v',
+                        style: const TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w700)),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
         ),
       ),
       actions: [
@@ -959,19 +997,28 @@ class _ItemGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 12,
-      runSpacing: 12,
-      children: items.map((item) {
+    final query = MediaQuery.of(context);
+    final isMobile = query.size.width < 800;
+
+    final grid = GridView.builder(
+      shrinkWrap: true,
+      physics: isMobile ? const BouncingScrollPhysics() : const NeverScrollableScrollPhysics(),
+      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: isMobile ? (query.size.width / 2) : 150,
+        mainAxisExtent: isMobile ? 70 : 80, // reduced to fit more items
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+      ),
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final item = items[index];
         final isSelected = picked?.id == item.id;
         final isLow = item.needsReorder;
         return GestureDetector(
           onTap: () => onSelect(item),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            width: 150,
-            height: 100,
-            padding: const EdgeInsets.all(14),
+            padding: EdgeInsets.all(isMobile ? 10 : 12),
             decoration: BoxDecoration(
               color: isSelected
                   ? AppTheme.pinTeal.withOpacity(0.25)
@@ -993,24 +1040,20 @@ class _ItemGrid extends StatelessWidget {
                   child: Text(
                     item.name,
                     style: TextStyle(
-                      color: isSelected
-                          ? Colors.white
-                          : const Color(0xFFCFD8DC),
-                      fontSize: 14,
+                      color: isSelected ? Colors.white : const Color(0xFFCFD8DC),
+                      fontSize: isMobile ? 12 : 14,
                       fontWeight: FontWeight.w700,
-                      height: 1.2,
+                      height: 1.15,
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 Row(
                   children: [
                     Icon(
-                      isLow
-                          ? Icons.warning_amber_rounded
-                          : Icons.inventory_2_rounded,
+                      isLow ? Icons.warning_amber_rounded : Icons.inventory_2_rounded,
                       size: 13,
                       color: isLow ? AppTheme.debtRed : AppTheme.pinMuted,
                     ),
@@ -1018,10 +1061,9 @@ class _ItemGrid extends StatelessWidget {
                     Text(
                       item.stockLabel,
                       style: TextStyle(
-                        fontSize: 12,
                         color: isLow ? AppTheme.debtRed : AppTheme.pinMuted,
-                        fontWeight:
-                            isLow ? FontWeight.w700 : FontWeight.normal,
+                        fontSize: isMobile ? 11 : 12,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
@@ -1030,8 +1072,17 @@ class _ItemGrid extends StatelessWidget {
             ),
           ),
         );
-      }).toList(),
+      },
     );
+
+    if (isMobile) {
+      // Limit to approx 4 rows for scrolling on tiny screens 
+      return Container(
+        constraints: const BoxConstraints(maxHeight: 310),
+        child: grid,
+      );
+    }
+    return grid;
   }
 }
 
@@ -1419,6 +1470,73 @@ class _EmptyInventory extends StatelessWidget {
                 color: AppTheme.pinMuted.withOpacity(0.6), fontSize: 14),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Menu Drawer (Mobile)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _MenuDrawer extends StatelessWidget {
+  final Staff staff;
+  final VoidCallback onLogWaste;
+  final VoidCallback onLogOut;
+  final List<Requisition> requests;
+  final bool loading;
+  final VoidCallback onRefresh;
+
+  const _MenuDrawer({
+    required this.staff,
+    required this.onLogWaste,
+    required this.onLogOut,
+    required this.requests,
+    required this.loading,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      backgroundColor: const Color(0xFF0D1B26),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  const Icon(Icons.person_rounded, color: AppTheme.pinMuted, size: 20),
+                  const SizedBox(width: 10),
+                  Text(staff.name, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+            const Divider(color: Color(0xFF1E2D3D), height: 1),
+            Expanded(
+              child: _MyRequestsPanel(
+                requests: requests,
+                loading: loading,
+                onRefresh: onRefresh,
+              ),
+            ),
+            const Divider(color: Color(0xFF1E2D3D), height: 1),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: TextButton.icon(
+                onPressed: onLogOut,
+                icon: const Icon(Icons.logout_rounded, color: AppTheme.pinMuted, size: 20),
+                label: const Text('Log Out', style: TextStyle(color: AppTheme.pinMuted, fontSize: 14)),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  alignment: Alignment.centerLeft,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -13,6 +13,9 @@ const posRouter             = require('./routes/pos');
 const payRunsRouter         = require('./routes/pay_runs');
 const purchaseOrdersRouter  = require('./routes/purchase_orders');
 const settingsRouter        = require('./routes/settings');
+const procurementRouter     = require('./routes/procurement');
+const featureFlagsRouter    = require('./routes/feature_flags');
+const adminRouter           = require('./routes/admin');
 
 const app = express();
 
@@ -29,6 +32,9 @@ app.use('/api/pos',              posRouter);
 app.use('/api/pay-runs',         payRunsRouter);
 app.use('/api/purchase-orders',  purchaseOrdersRouter);
 app.use('/api/settings',         settingsRouter);
+app.use('/api/procurement',      procurementRouter);
+app.use('/api/feature-flags',    featureFlagsRouter);
+app.use('/api/admin',            adminRouter);
 
 // Health check
 app.get('/health', (req, res) => {

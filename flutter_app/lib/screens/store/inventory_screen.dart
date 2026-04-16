@@ -114,6 +114,18 @@ class _InventoryScreenState extends State<InventoryScreen> {
     }
   }
 
+  // Phase 8: Log store-side waste / write-off for an item.
+  Future<void> _showLogWasteDialog(InventoryItem item) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (_) => _LogWasteDialog(item: item, staff: widget.staff),
+    );
+    if (result == true) {
+      _loadData();
+      _showSuccess('Waste logged for ${item.name}.');
+    }
+  }
+
   Future<void> _deleteItem(InventoryItem item) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -175,10 +187,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
               : filtered.isEmpty
                   ? const _EmptyState()
                   : _InventoryTable(
-                      items:    filtered,
-                      onEdit:   _showItemDialog,
-                      onAdjust: _showAdjustDialog,
-                      onDelete: _deleteItem,
+                      items:      filtered,
+                      onEdit:     _showItemDialog,
+                      onAdjust:   _showAdjustDialog,
+                      onLogWaste: _showLogWasteDialog,
+                      onDelete:   _deleteItem,
                     ),
         ),
       ],
@@ -382,12 +395,14 @@ class _InventoryTable extends StatelessWidget {
   final List<InventoryItem> items;
   final void Function({InventoryItem? item}) onEdit;
   final void Function(InventoryItem) onAdjust;
+  final void Function(InventoryItem) onLogWaste;
   final void Function(InventoryItem) onDelete;
 
   const _InventoryTable({
     required this.items,
     required this.onEdit,
     required this.onAdjust,
+    required this.onLogWaste,
     required this.onDelete,
   });
 
@@ -515,6 +530,13 @@ class _InventoryTable extends StatelessWidget {
                       color: AppTheme.paidGreen,
                       onTap: () => onAdjust(item),
                     ),
+                    // Log Waste (Phase 8)
+                    _ActionBtn(
+                      icon: Icons.delete_sweep_rounded,
+                      tooltip: 'Log Waste / Write-off',
+                      color: Colors.orange.shade700,
+                      onTap: () => onLogWaste(item),
+                    ),
                     // Delete
                     _ActionBtn(
                       icon: Icons.delete_outline_rounded,
@@ -583,6 +605,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   late TextEditingController _notesCtrl;
   String _uom = 'kg';
   String? _supplierId;
+  String? _defaultPurchaserId;
   bool _saving = false;
 
   @override
@@ -600,8 +623,9 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     _costCtrl     = TextEditingController(
         text: s?.costPerUnit?.toStringAsFixed(2) ?? '');
     _notesCtrl    = TextEditingController(text: s?.notes ?? '');
-    _uom          = s?.unitOfMeasure ?? 'kg';
-    _supplierId   = s?.supplierId;
+    _uom                 = s?.unitOfMeasure ?? 'kg';
+    _supplierId          = s?.supplierId;
+    _defaultPurchaserId  = s?.defaultPurchaserId;
   }
 
   @override
@@ -624,8 +648,9 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       'quantity_in_stock': double.tryParse(_qtyCtrl.text.trim()) ?? 0,
       'reorder_level':    _reorderCtrl.text.trim().isEmpty ? null : double.tryParse(_reorderCtrl.text.trim()),
       'cost_per_unit':    _costCtrl.text.trim().isEmpty ? null : double.tryParse(_costCtrl.text.trim()),
-      'supplier_id':      _supplierId,
-      'notes':            _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+      'supplier_id':           _supplierId,
+      'default_purchaser_id':  _defaultPurchaserId,
+      'notes':                 _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
     };
 
     try {
@@ -740,7 +765,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                // Supplier dropdown
+                // Supplier dropdown (external suppliers)
                 DropdownButtonFormField<String?>(
                   value: _supplierId,
                   decoration: const InputDecoration(
@@ -749,10 +774,30 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                   items: [
                     const DropdownMenuItem<String?>(
                         value: null, child: Text('No supplier')),
-                    ...widget.suppliers.map((s) => DropdownMenuItem(
-                        value: s.id, child: Text(s.name))),
+                    ...widget.suppliers
+                        .where((s) => !s.isInternal)
+                        .map((s) => DropdownMenuItem(
+                            value: s.id, child: Text(s.name))),
                   ],
                   onChanged: (v) => setState(() => _supplierId = v),
+                ),
+                const SizedBox(height: 12),
+                // Default Purchaser dropdown (internal suppliers only)
+                DropdownButtonFormField<String?>(
+                  value: _defaultPurchaserId,
+                  decoration: const InputDecoration(
+                      labelText: 'Default Purchaser (who buys this item)',
+                      hintText: 'Assign to a manager expense account',
+                      prefixIcon: Icon(Icons.account_balance_wallet_rounded)),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                        value: null, child: Text('— Unassigned —')),
+                    ...widget.suppliers
+                        .where((s) => s.isInternal)
+                        .map((s) => DropdownMenuItem(
+                            value: s.id, child: Text(s.name))),
+                  ],
+                  onChanged: (v) => setState(() => _defaultPurchaserId = v),
                 ),
                 const SizedBox(height: 12),
                 // Notes
@@ -1108,6 +1153,162 @@ class _EmptyState extends StatelessWidget {
               style: TextStyle(fontSize: 14, color: Colors.grey.shade400)),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8: Log Waste Dialog (Store-side)
+// Records expired / spoiled / ruined stock and deducts it from inventory.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _LogWasteDialog extends StatefulWidget {
+  final InventoryItem item;
+  final Staff staff;
+  const _LogWasteDialog({required this.item, required this.staff});
+
+  @override
+  State<_LogWasteDialog> createState() => _LogWasteDialogState();
+}
+
+class _LogWasteDialogState extends State<_LogWasteDialog> {
+  final _formKey  = GlobalKey<FormState>();
+  final _qtyCtrl  = TextEditingController(text: '1');
+  final _noteCtrl = TextEditingController();
+  bool _saving    = false;
+
+  @override
+  void dispose() {
+    _qtyCtrl.dispose();
+    _noteCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final qty = double.parse(_qtyCtrl.text.trim());
+    if (qty > widget.item.quantityInStock) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Cannot write off more than in stock '
+            '(${widget.item.quantityInStock.toStringAsFixed(1)} ${widget.item.unitOfMeasure}).'),
+        backgroundColor: AppTheme.debtRed,
+      ));
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await ApiService.instance.logWaste(
+        inventoryItemId:   widget.item.id,
+        quantity:          qty,
+        loggedBy:          widget.staff.name,
+        notes:             _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+        requesterLocation: widget.staff.locationName,
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      setState(() => _saving = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.toString()),
+          backgroundColor: AppTheme.debtRed,
+        ));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final item   = widget.item;
+    final inStock = item.quantityInStock;
+
+    return AlertDialog(
+      title: Row(children: [
+        Icon(Icons.delete_sweep_rounded, color: Colors.orange.shade700),
+        const SizedBox(width: 10),
+        Expanded(child: Text('Log Waste: ${item.name}',
+            overflow: TextOverflow.ellipsis)),
+      ]),
+      content: SizedBox(
+        width: 380,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Row(children: [
+                  Icon(Icons.inventory_2_rounded,
+                      size: 16, color: Colors.orange.shade700),
+                  const SizedBox(width: 8),
+                  Text(
+                    'In Stock: ${inStock.toStringAsFixed(inStock % 1 == 0 ? 0 : 1)} ${item.unitOfMeasure}',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.orange.shade800),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _qtyCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: 'Waste Quantity (${item.unitOfMeasure})',
+                  prefixIcon: const Icon(Icons.remove_circle_outline_rounded),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide:
+                        BorderSide(color: Colors.orange.shade700, width: 2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                validator: (v) {
+                  if (v == null || v.isEmpty) return 'Required';
+                  final n = double.tryParse(v);
+                  if (n == null || n <= 0) return 'Enter a positive number';
+                  if (n > inStock) return 'Cannot exceed stock (${inStock.toStringAsFixed(1)})';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _noteCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Reason / Notes (optional)',
+                  prefixIcon: Icon(Icons.notes_rounded),
+                  hintText: 'e.g. Expired, Spilled, Damaged',
+                ),
+                maxLines: 2,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: _saving ? null : _save,
+          style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange.shade700),
+          child: _saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : const Text('Log Waste'),
+        ),
+      ],
     );
   }
 }

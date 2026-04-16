@@ -165,102 +165,72 @@ class _PayRunsScreenState extends State<PayRunsScreen> {
     }
   }
 
-  Future<void> _submit([List<String> toPostponeIds = const []]) async {
+  // Phase 7: Replaced Submit + WhatsApp + Approve with a single Finalize action.
+  // The manager now takes full ownership of pay runs without owner sign-off.
+  Future<void> _finalize([List<String> toPostponeIds = const []]) async {
     if (_selectedRun == null) return;
+    final included = ((_selectedRun!['details'] as List?) ?? [])
+        .cast<Map<String, dynamic>>()
+        .where((d) => d['status'] == 'Included')
+        .toList();
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Submit for Owner Approval?'),
-        content: const Text(
-            'This will lock the pay run and generate a WhatsApp message for the owner to review.'),
+        title: const Text('Finalize & Start Paying?'),
+        content: Text(
+            'This will approve the run immediately and unlock disburse buttons for '
+            '${included.length} supplier${included.length == 1 ? '' : 's'}. '
+            'You can begin disbursing right away.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
             style: FilledButton.styleFrom(backgroundColor: AppTheme.pinTeal),
-            child: const Text('Submit'),
+            child: const Text('Finalize & Start Paying'),
           ),
         ],
       ),
     );
     if (ok != true) return;
     try {
-      // Postpone any unchecked suppliers before submitting
+      // Postpone any unchecked suppliers before finalizing
       for (final id in toPostponeIds) {
         await ApiService.instance.updatePayRunDetail(
             _selectedRun!['id'] as String, id, {'status': 'Postponed'});
       }
-      await ApiService.instance.submitPayRun(
-        _selectedRun!['id'] as String, widget.staff.name);
-      await _sendWhatsApp();
+      await ApiService.instance.finalizePayRun(_selectedRun!['id'] as String);
+      _snack('Pay run approved. You can now disburse payments.');
       _load();
     } on ApiException catch (e) {
       _snack(e.message, error: true);
     }
   }
 
-  Future<void> _sendWhatsApp() async {
+  Future<void> _disburseDetail(Map<String, dynamic> detail) async {
     if (_selectedRun == null) return;
-    try {
-      final data = await ApiService.instance
-          .getPayRunWhatsApp(_selectedRun!['id'] as String);
-      final url = data['whatsapp_url'] as String;
-      if (await canLaunchUrl(Uri.parse(url))) {
-        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-      }
-    } catch (_) {}
-  }
+    final runId    = _selectedRun!['id'] as String;
+    final detailId = detail['id'] as String;
 
-  Future<void> _approve() async {
-    if (_selectedRun == null) return;
-    final ok = await showDialog<bool>(
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Approve Pay Run?'),
-        content: const Text('Mark this run as approved. It can then be disbursed.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.paidGreen),
-            child: const Text('Approve'),
-          ),
-        ],
+      builder: (_) => _DisburseDetailDialog(
+        supplierName: detail['supplier_name']?.toString() ?? 'Supplier',
+        amount: num.tryParse(detail['approved_amount']?.toString() ?? '0') ?? 0,
+        staffName: widget.staff.name,
       ),
     );
-    if (ok != true) return;
-    try {
-      await ApiService.instance.approvePayRun(_selectedRun!['id'] as String);
-      _load();
-    } on ApiException catch (e) {
-      _snack(e.message, error: true);
-    }
-  }
+    if (result == null) return;
 
-  Future<void> _disburse() async {
-    if (_selectedRun == null) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Disburse Payments?'),
-        content: const Text(
-            'This will post PAYMENT entries to each supplier\'s ledger, '
-            'reducing their debt balance. This action cannot be undone.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.debtRed),
-            child: const Text('Disburse'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
     try {
-      final result = await ApiService.instance.disbursePayRun(
-          _selectedRun!['id'] as String, widget.staff.name);
-      _snack('${result['suppliers_paid']} suppliers paid. Ledger updated.');
+      final res = await ApiService.instance.disbursePayRunDetail(
+        runId, detailId,
+        disbursedBy: widget.staff.name,
+        paymentSourceId: result['payment_source_id'] as String?,
+        paymentReference: result['payment_reference'] as String?,
+      );
+      _snack(res['run_closed'] == true
+          ? 'All payments disbursed. Run closed.'
+          : '${detail['supplier_name']} payment posted to ledger.');
       _load();
     } on ApiException catch (e) {
       _snack(e.message, error: true);
@@ -333,10 +303,8 @@ class _PayRunsScreenState extends State<PayRunsScreen> {
                     onEditAmount: _editAmount,
                     onTogglePostpone: _togglePostpone,
                     onRemove: _removeDetail,
-                    onSubmit: _submit,
-                    onSendWhatsApp: _sendWhatsApp,
-                    onApprove: _approve,
-                    onDisburse: _disburse,
+                    onFinalize: _finalize,
+                    onDisburseDetail: _disburseDetail,
                     onRefresh: () => _openRun(_selectedRun!['id'] as String),
                   ),
                 ),
@@ -370,10 +338,8 @@ class _PayRunsScreenState extends State<PayRunsScreen> {
                       onEditAmount: _editAmount,
                       onTogglePostpone: _togglePostpone,
                       onRemove: _removeDetail,
-                      onSubmit: _submit,
-                      onSendWhatsApp: _sendWhatsApp,
-                      onApprove: _approve,
-                      onDisburse: _disburse,
+                      onFinalize: _finalize,
+                      onDisburseDetail: _disburseDetail,
                       onRefresh: () => _openRun(_selectedRun!['id'] as String),
                     ),
             ),
@@ -510,10 +476,9 @@ class _RunDetailPanel extends StatefulWidget {
   final void Function(Map<String, dynamic>) onEditAmount;
   final void Function(Map<String, dynamic>) onTogglePostpone;
   final void Function(Map<String, dynamic>) onRemove;
-  final Future<void> Function(List<String> toPostponeIds) onSubmit;
-  final VoidCallback onSendWhatsApp;
-  final VoidCallback onApprove;
-  final VoidCallback onDisburse;
+  /// Phase 7: single manager-led action — transitions Draft → Approved immediately.
+  final Future<void> Function(List<String> toPostponeIds) onFinalize;
+  final Future<void> Function(Map<String, dynamic> detail) onDisburseDetail;
   final VoidCallback onRefresh;
 
   const _RunDetailPanel({
@@ -523,10 +488,8 @@ class _RunDetailPanel extends StatefulWidget {
     required this.onEditAmount,
     required this.onTogglePostpone,
     required this.onRemove,
-    required this.onSubmit,
-    required this.onSendWhatsApp,
-    required this.onApprove,
-    required this.onDisburse,
+    required this.onFinalize,
+    required this.onDisburseDetail,
     required this.onRefresh,
   });
 
@@ -566,10 +529,10 @@ class _RunDetailPanelState extends State<_RunDetailPanel> {
     });
   }
 
-  Future<void> _handleSubmit(List<Map<String, dynamic>> included) async {
+  Future<void> _handleFinalize(List<Map<String, dynamic>> included) async {
     final allIds = included.map((d) => d['id'] as String).toSet();
     final toPostpone = allIds.difference(_selectedIds).toList();
-    await widget.onSubmit(toPostpone);
+    await widget.onFinalize(toPostpone);
   }
 
   @override
@@ -617,6 +580,7 @@ class _RunDetailPanelState extends State<_RunDetailPanel> {
                 runSpacing: 8,
                 alignment: WrapAlignment.end,
                 children: [
+                  // Phase 7: Draft → Approved in one step, no owner WhatsApp sign-off.
                   if (isDraft) ...[
                     OutlinedButton.icon(
                       onPressed: widget.onAutoPopulate,
@@ -626,38 +590,46 @@ class _RunDetailPanelState extends State<_RunDetailPanel> {
                     FilledButton.icon(
                       onPressed: included.isEmpty
                           ? null
-                          : () => _handleSubmit(included),
-                      icon: const Icon(Icons.send_rounded, size: 16),
+                          : () => _handleFinalize(included),
+                      icon: const Icon(Icons.rocket_launch_rounded, size: 16),
                       label: Text(_selectedIds.length < included.length
-                          ? 'Submit ${_selectedIds.length}/${included.length} for Approval'
-                          : 'Submit for Approval'),
+                          ? 'Finalize ${_selectedIds.length}/${included.length} & Start Paying'
+                          : 'Finalize & Start Paying'),
                       style: FilledButton.styleFrom(
                           backgroundColor: AppTheme.pinTeal),
                     ),
                   ],
-                  if (isSubmit) ...[
-                    OutlinedButton.icon(
-                      onPressed: widget.onSendWhatsApp,
-                      icon: const Icon(Icons.share_rounded, size: 16),
-                      label: const Text('Re-send WhatsApp'),
-                    ),
-                    if (widget.staff.canApprovePayRun)
-                      FilledButton.icon(
-                        onPressed: widget.onApprove,
-                        icon: const Icon(Icons.check_circle_rounded, size: 16),
-                        label: const Text('Mark Approved'),
-                        style: FilledButton.styleFrom(
-                            backgroundColor: AppTheme.paidGreen),
-                      ),
-                  ],
-                  if (isApproved)
+                  // Legacy: runs already in Submitted state can still be approved manually.
+                  if (isSubmit)
                     FilledButton.icon(
-                      onPressed: widget.onDisburse,
-                      icon: const Icon(Icons.account_balance_rounded, size: 16),
-                      label: const Text('Disburse Payments'),
+                      onPressed: () async {
+                        try {
+                          await ApiService.instance.approvePayRun(
+                              widget.run['id'] as String);
+                          widget.onRefresh();
+                        } catch (_) {}
+                      },
+                      icon: const Icon(Icons.check_circle_rounded, size: 16),
+                      label: const Text('Mark Approved'),
                       style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.debtRed),
+                          backgroundColor: AppTheme.paidGreen),
                     ),
+                  if (isApproved) (() {
+                    final paid = details.where((d) => d['status'] == 'Paid').length;
+                    return Chip(
+                      avatar: const Icon(Icons.account_balance_rounded,
+                          color: Colors.white, size: 14),
+                      label: Text(
+                        paid == included.length
+                            ? 'All paid — closing…'
+                            : 'Disburse per row below ($paid/${included.length} paid)',
+                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                      backgroundColor: paid == included.length
+                          ? AppTheme.paidGreen
+                          : AppTheme.debtRed,
+                    );
+                  })(),
                   if (isDisbursed)
                     const Chip(
                       label: Text('Payments disbursed ✓',
@@ -702,6 +674,7 @@ class _RunDetailPanelState extends State<_RunDetailPanel> {
                               }
                             })
                         : null,
+                    onDisburseDetail: isApproved ? widget.onDisburseDetail : null,
                   ),
                   const SizedBox(height: 24),
                 ],
@@ -763,6 +736,7 @@ List<Widget> _buildDayGroups(
   required void Function(Map<String, dynamic>) onRemove,
   Set<String>? selectedIds,
   void Function(String id, bool selected)? onToggleSelect,
+  Future<void> Function(Map<String, dynamic>)? onDisburseDetail,
 }) {
   // Group by payment_day; null/empty → 'Unscheduled'
   final Map<String, List<Map<String, dynamic>>> groups = {};
@@ -829,6 +803,7 @@ List<Widget> _buildDayGroups(
         onRemove: onRemove,
         selectedIds: selectedIds,
         onToggleSelect: onToggleSelect,
+        onDisburseDetail: onDisburseDetail,
       ),
     );
     widgets.add(const SizedBox(height: 16));
@@ -888,6 +863,8 @@ class _SupplierTable extends StatelessWidget {
   // Optional checkbox support (Draft mode selection)
   final Set<String>? selectedIds;
   final void Function(String id, bool selected)? onToggleSelect;
+  // Optional per-row disburse (Approved mode)
+  final Future<void> Function(Map<String, dynamic>)? onDisburseDetail;
 
   const _SupplierTable({
     required this.details,
@@ -897,6 +874,7 @@ class _SupplierTable extends StatelessWidget {
     required this.onRemove,
     this.selectedIds,
     this.onToggleSelect,
+    this.onDisburseDetail,
   });
 
   bool get _showCheckboxes => selectedIds != null;
@@ -1038,7 +1016,26 @@ class _SupplierTable extends StatelessWidget {
                             ),
                           ],
                         )
-                      : const SizedBox(),
+                      : onDisburseDetail != null
+                          ? (d['status'] == 'Paid'
+                              ? const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 8),
+                                  child: Icon(Icons.check_circle_rounded,
+                                      color: AppTheme.paidGreen, size: 20),
+                                )
+                              : OutlinedButton.icon(
+                                  onPressed: () => onDisburseDetail!(d),
+                                  icon: const Icon(Icons.payments_rounded, size: 14),
+                                  label: const Text('Pay', style: TextStyle(fontSize: 12)),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppTheme.debtRed,
+                                    side: const BorderSide(color: AppTheme.debtRed),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                ))
+                          : const SizedBox(),
                 ),
               ],
             );
@@ -1055,3 +1052,152 @@ Widget _TH(String text) => Padding(
           style: const TextStyle(
               color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
     );
+
+// ── Disburse Detail Dialog ────────────────────────────────────────────────────
+// Shown when tapping "Pay" on a supplier row in an Approved pay run.
+// Returns { payment_source_id?, payment_reference? } or null if cancelled.
+
+class _DisburseDetailDialog extends StatefulWidget {
+  final String supplierName;
+  final num amount;
+  final String staffName;
+
+  const _DisburseDetailDialog({
+    required this.supplierName,
+    required this.amount,
+    required this.staffName,
+  });
+
+  @override
+  State<_DisburseDetailDialog> createState() => _DisburseDetailDialogState();
+}
+
+class _DisburseDetailDialogState extends State<_DisburseDetailDialog> {
+  List<Map<String, dynamic>> _internalSuppliers = [];
+  String? _selectedSourceId;
+  final _refCtrl = TextEditingController();
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInternalSuppliers();
+  }
+
+  @override
+  void dispose() {
+    _refCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadInternalSuppliers() async {
+    try {
+      final list = await ApiService.instance.getInternalSuppliers();
+      setState(() { _internalSuppliers = list; _loading = false; });
+    } catch (_) {
+      setState(() => _loading = false);
+    }
+  }
+
+  void _confirm() {
+    setState(() => _saving = true);
+    Navigator.of(context).pop({
+      'payment_source_id': _selectedSourceId,
+      'payment_reference': _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(children: [
+        const Icon(Icons.payments_rounded, color: AppTheme.debtRed),
+        const SizedBox(width: 10),
+        Expanded(child: Text('Pay ${widget.supplierName}',
+            style: const TextStyle(fontSize: 16))),
+      ]),
+      content: SizedBox(
+        width: 400,
+        child: _loading
+            ? const SizedBox(
+                height: 80,
+                child: Center(child: CircularProgressIndicator()))
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Amount: ${_kes.format(widget.amount)}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 15)),
+                  const SizedBox(height: 16),
+
+                  // Payment source
+                  DropdownButtonFormField<String?>(
+                    value: _selectedSourceId,
+                    decoration: const InputDecoration(
+                      labelText: 'Payment Source',
+                      hintText: 'How is this being paid?',
+                      prefixIcon: Icon(Icons.account_balance_wallet_rounded),
+                      border: OutlineInputBorder(),
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('Bank Transfer / Direct')),
+                      ..._internalSuppliers.map((s) => DropdownMenuItem(
+                          value: s['id'] as String,
+                          child: Text('Cash via ${s['name']}'))),
+                    ],
+                    onChanged: (v) => setState(() => _selectedSourceId = v),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // MPesa / reference
+                  TextField(
+                    controller: _refCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'MPesa / Payment Reference (optional)',
+                      hintText: 'e.g. QHX7Y3Z2AB',
+                      prefixIcon: Icon(Icons.receipt_rounded),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+
+                  if (_selectedSourceId != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF8E1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFFF8F00)),
+                      ),
+                      child: Row(children: [
+                        const Icon(Icons.info_outline_rounded,
+                            size: 16, color: Color(0xFFFF8F00)),
+                        const SizedBox(width: 8),
+                        const Expanded(child: Text(
+                          'A double-entry will be posted: PAYMENT to supplier + PURCHASE to the selected manager cash account.',
+                          style: TextStyle(fontSize: 11, color: Color(0xFF6D4C41)),
+                        )),
+                      ]),
+                    ),
+                  ],
+                ],
+              ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.of(context).pop(null),
+            child: const Text('Cancel')),
+        FilledButton.icon(
+          onPressed: _loading || _saving ? null : _confirm,
+          icon: const Icon(Icons.check_rounded, size: 16),
+          label: const Text('Confirm Payment'),
+          style: FilledButton.styleFrom(backgroundColor: AppTheme.debtRed),
+        ),
+      ],
+    );
+  }
+}

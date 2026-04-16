@@ -4,9 +4,8 @@ import '../../models/staff.dart';
 import '../../services/api.dart';
 import 'staff_management_screen.dart';
 
-/// Settings screen — tabbed:
-///   Tab 1 (Business Details): edit business_name and slogan — shown if canManageSettings
-///   Tab 2 (Staff Management): full staff CRUD — shown if canManageStaff
+/// Settings screen — Staff Management only.
+/// Business Details have been moved to the Super Admin Dashboard.
 class SettingsScreen extends StatefulWidget {
   final Staff staff;
   const SettingsScreen({super.key, required this.staff});
@@ -29,12 +28,6 @@ class _SettingsScreenState extends State<SettingsScreen>
           label: 'Staff Management',
           icon: Icons.badge_rounded,
           body: const StaffManagementScreen(),
-        ),
-      if (widget.staff.canManageSettings)
-        (
-          label: 'Business Details',
-          icon: Icons.business_rounded,
-          body: const _BusinessDetailsTab(),
         ),
     ];
     _tabCtrl = TabController(length: _tabs.length, vsync: this);

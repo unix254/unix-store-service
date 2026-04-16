@@ -12,6 +12,10 @@ class Requisition {
   final String requestedAt;
   final String? issuedAt;
   final String? issuedBy;
+  /// Phase 8: actual quantity the storekeeper chose to issue (may differ from [quantity]).
+  final double? issuedQuantity;
+  /// Phase 8: storekeeper's note explaining an adjustment or rejection reason.
+  final String? issueNotes;
 
   const Requisition({
     required this.id,
@@ -27,6 +31,8 @@ class Requisition {
     required this.requestedAt,
     this.issuedAt,
     this.issuedBy,
+    this.issuedQuantity,
+    this.issueNotes,
   });
 
   factory Requisition.fromJson(Map<String, dynamic> j) => Requisition(
@@ -43,6 +49,8 @@ class Requisition {
         requestedAt:      j['requested_at'] as String? ?? '',
         issuedAt:         j['issued_at'] as String?,
         issuedBy:         j['issued_by'] as String?,
+        issuedQuantity:   double.tryParse(j['issued_quantity']?.toString() ?? ''),
+        issueNotes:       j['issue_notes'] as String?,
       );
 
   bool get isPending  => status == 'Pending';

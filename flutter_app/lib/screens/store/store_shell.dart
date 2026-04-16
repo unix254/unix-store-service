@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../config/theme.dart';
 import '../../models/staff.dart';
+import '../../services/api.dart';
 import '../pin_login.dart';
 import 'supplier_ledger.dart';
 import 'requisition_approval.dart';
@@ -9,7 +10,9 @@ import 'yield_config_screen.dart';
 import 'variance_screen.dart';
 import 'pay_runs_screen.dart';
 import 'purchase_orders_screen.dart';
+import 'procurement_screen.dart';
 import 'settings_screen.dart';
+import 'expense_accounts_screen.dart';
 
 enum _NavItem {
   suppliers,
@@ -19,6 +22,8 @@ enum _NavItem {
   variance,
   payRuns,
   purchaseOrders,
+  procurement,
+  expenseAccounts,
   settings,
 }
 
@@ -33,32 +38,67 @@ class StoreShell extends StatefulWidget {
 class _StoreShellState extends State<StoreShell> {
   late _NavItem _selected;
 
+  /// Feature flags from the database — default all true so nav shows immediately,
+  /// then updates once the API call resolves.
+  Map<String, bool> _flags = {};
+
   @override
   void initState() {
     super.initState();
+    _loadFeatureFlags();
     // Default to the first visible nav item for this user
     final items = _navItems;
     _selected = items.isNotEmpty ? items.first.item : _NavItem.settings;
   }
 
-  /// Build sidebar nav dynamically from the logged-in user's capabilities.
+  Future<void> _loadFeatureFlags() async {
+    try {
+      final flags = await ApiService.instance.getFeatureFlags();
+      if (!mounted) return;
+      setState(() {
+        _flags = {for (final f in flags) f.featureKey: f.enabled};
+        // Re-select the first visible item in case the previous selection
+        // was just disabled by a flag.
+        final items = _navItems;
+        if (items.isNotEmpty && !items.any((n) => n.item == _selected)) {
+          _selected = items.first.item;
+        }
+      });
+    } catch (_) {
+      // Flags are cosmetic — silently fall back to all-enabled defaults
+    }
+  }
+
+  /// Returns true when a module flag is enabled (defaults to true if not yet loaded).
+  bool _flag(String key) => _flags[key] ?? true;
+
+  /// Build sidebar nav dynamically from the logged-in user's capabilities
+  /// AND the database-driven feature flags.
   List<({IconData icon, String label, _NavItem item})> get _navItems {
     final s = widget.staff;
     return [
       if (s.canApproveRequisitions)
-        (icon: Icons.assignment_rounded,   label: 'Requisitions',     item: _NavItem.requisitions),
+        (icon: Icons.assignment_rounded,   label: 'Requisitions',    item: _NavItem.requisitions),
       if (s.canManageInventory || s.canDraftPO) ...[
-        (icon: Icons.people_alt_rounded,   label: 'Suppliers',        item: _NavItem.suppliers),
-        (icon: Icons.inventory_2_rounded,  label: 'Inventory',        item: _NavItem.inventory),
-        (icon: Icons.tune_rounded,         label: 'Yield Config',     item: _NavItem.yield_),
-        (icon: Icons.shopping_cart_rounded,label: 'Purchase Orders',  item: _NavItem.purchaseOrders),
+        (icon: Icons.people_alt_rounded,   label: 'Suppliers',       item: _NavItem.suppliers),
+        (icon: Icons.inventory_2_rounded,  label: 'Inventory',       item: _NavItem.inventory),
+        if (_flag('module_yield_config'))
+          (icon: Icons.tune_rounded,           label: 'Yield Config',    item: _NavItem.yield_),
+        if (_flag('module_purchase_orders'))
+          (icon: Icons.shopping_cart_rounded,  label: 'Purchase Orders', item: _NavItem.purchaseOrders),
+        if (_flag('module_procurement'))
+          (icon: Icons.shopping_basket_rounded, label: 'Procurement',    item: _NavItem.procurement),
       ],
-      if (s.canViewVariance)
-        (icon: Icons.analytics_rounded,    label: 'Variance',         item: _NavItem.variance),
-      if (s.canApprovePayRun)
-        (icon: Icons.payments_rounded,     label: 'Pay Runs',         item: _NavItem.payRuns),
-      if (s.canManageSettings || s.canManageStaff)
-        (icon: Icons.settings_rounded,     label: 'Settings',         item: _NavItem.settings),
+      if (s.canViewVariance && _flag('module_variance'))
+        (icon: Icons.analytics_rounded,    label: 'Variance',        item: _NavItem.variance),
+      // Phase 7: Pay Runs are now fully manager-led; Storekeepers no longer have access.
+      if ((s.isManager || s.isOwner) && _flag('module_pay_runs'))
+        (icon: Icons.payments_rounded,         label: 'Pay Runs',          item: _NavItem.payRuns),
+      // Phase 10: Expense Accounts — manager float / Cash-In workflows
+      if (s.canManageExpenseAccounts)
+        (icon: Icons.account_balance_wallet_rounded, label: 'Expense Accounts', item: _NavItem.expenseAccounts),
+      if (s.canManageStaff)
+        (icon: Icons.settings_rounded,         label: 'Settings',          item: _NavItem.settings),
     ];
   }
 
@@ -76,8 +116,12 @@ class _StoreShellState extends State<StoreShell> {
         return const VarianceScreen();
       case _NavItem.purchaseOrders:
         return PurchaseOrdersScreen(staff: widget.staff);
+      case _NavItem.procurement:
+        return ProcurementScreen(staff: widget.staff);
       case _NavItem.payRuns:
         return PayRunsScreen(staff: widget.staff);
+      case _NavItem.expenseAccounts:
+        return ExpenseAccountsScreen(staff: widget.staff);
       case _NavItem.settings:
         return SettingsScreen(staff: widget.staff);
     }

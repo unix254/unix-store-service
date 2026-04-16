@@ -10,12 +10,14 @@ router.get('/', async (req, res) => {
     const rows = await query(`
       SELECT
         i.*,
-        s.name AS supplier_name,
+        s.name  AS supplier_name,
         s.payment_day AS supplier_payment_day,
         s.lead_time_days AS supplier_lead_time_days,
+        p.name  AS default_purchaser_name,
         (i.reorder_level IS NOT NULL AND i.quantity_in_stock <= i.reorder_level) AS needs_reorder
       FROM unix_store_inventory i
       LEFT JOIN unix_suppliers s ON s.id = i.supplier_id
+      LEFT JOIN unix_suppliers p ON p.id = i.default_purchaser_id
       ORDER BY i.category, i.name
     `);
     res.json(rows);
@@ -174,7 +176,7 @@ router.get('/:id', async (req, res) => {
 // POST /api/inventory  – add a new store item
 router.post('/', async (req, res) => {
   const { name, category, unit_of_measure, quantity_in_stock, reorder_level,
-          cost_per_unit, supplier_id, notes, lead_time_days } = req.body;
+          cost_per_unit, supplier_id, notes, lead_time_days, default_purchaser_id } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (!unit_of_measure) return res.status(400).json({ error: 'unit_of_measure is required' });
   const id = uuidv4();
@@ -182,11 +184,11 @@ router.post('/', async (req, res) => {
     await query(
       `INSERT INTO unix_store_inventory
          (id, name, category, unit_of_measure, quantity_in_stock, reorder_level,
-          cost_per_unit, supplier_id, notes, lead_time_days)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          cost_per_unit, supplier_id, notes, lead_time_days, default_purchaser_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, name, category || null, unit_of_measure, quantity_in_stock || 0,
        reorder_level || null, cost_per_unit || null, supplier_id || null,
-       notes || null, lead_time_days || null]
+       notes || null, lead_time_days || null, default_purchaser_id || null]
     );
     res.status(201).json({ id });
   } catch (err) {
@@ -197,16 +199,18 @@ router.post('/', async (req, res) => {
 // PUT /api/inventory/:id  – full update
 router.put('/:id', async (req, res) => {
   const { name, category, unit_of_measure, quantity_in_stock, reorder_level,
-          cost_per_unit, supplier_id, notes, lead_time_days } = req.body;
+          cost_per_unit, supplier_id, notes, lead_time_days, default_purchaser_id } = req.body;
   try {
     await query(
       `UPDATE unix_store_inventory
        SET name=?, category=?, unit_of_measure=?, quantity_in_stock=?,
-           reorder_level=?, cost_per_unit=?, supplier_id=?, notes=?, lead_time_days=?
+           reorder_level=?, cost_per_unit=?, supplier_id=?, notes=?,
+           lead_time_days=?, default_purchaser_id=?
        WHERE id=?`,
       [name, category || null, unit_of_measure, quantity_in_stock,
        reorder_level || null, cost_per_unit || null, supplier_id || null,
-       notes || null, lead_time_days || null, req.params.id]
+       notes || null, lead_time_days || null, default_purchaser_id || null,
+       req.params.id]
     );
     res.json({ ok: true });
   } catch (err) {

@@ -5,13 +5,16 @@ const { query } = require('../db');
 const router = express.Router();
 
 // GET /api/suppliers  – list all suppliers with their current balance
+// For external suppliers: PURCHASE increases debt, PAYMENT decreases it.
+// For internal suppliers (managers): PURCHASE + SUPPLIER_PAYMENT are both debits
+//   (cash spent from the float), PAYMENT + CASH_IN are credits (float replenishment).
 router.get('/', async (req, res) => {
   try {
     const rows = await query(`
       SELECT
         s.*,
-        COALESCE(SUM(CASE WHEN l.transaction_type = 'PURCHASE' THEN l.amount ELSE 0 END), 0)
-          - COALESCE(SUM(CASE WHEN l.transaction_type = 'PAYMENT'  THEN l.amount ELSE 0 END), 0)
+        COALESCE(SUM(CASE WHEN l.transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT') THEN l.amount ELSE 0 END), 0)
+          - COALESCE(SUM(CASE WHEN l.transaction_type IN ('PAYMENT','CASH_IN') THEN l.amount ELSE 0 END), 0)
           AS balance_due
       FROM unix_suppliers s
       LEFT JOIN unix_supplier_ledger l ON l.supplier_id = s.id
@@ -38,14 +41,15 @@ router.get('/:id', async (req, res) => {
 
 // POST /api/suppliers
 router.post('/', async (req, res) => {
-  const { name, phone, location, payment_day, lead_time_days, notes } = req.body;
+  const { name, phone, location, payment_day, lead_time_days, notes, is_internal } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const id = uuidv4();
   try {
     await query(
-      `INSERT INTO unix_suppliers (id, name, phone, location, payment_day, lead_time_days, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, name, phone || null, location || null, payment_day || null, lead_time_days || 1, notes || null]
+      `INSERT INTO unix_suppliers (id, name, phone, location, payment_day, lead_time_days, notes, is_internal)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, name, phone || null, location || null, payment_day || null, lead_time_days || 1,
+       notes || null, is_internal ? 1 : 0]
     );
     res.status(201).json({ id });
   } catch (err) {
@@ -55,12 +59,13 @@ router.post('/', async (req, res) => {
 
 // PUT /api/suppliers/:id
 router.put('/:id', async (req, res) => {
-  const { name, phone, location, payment_day, lead_time_days, notes } = req.body;
+  const { name, phone, location, payment_day, lead_time_days, notes, is_internal } = req.body;
   try {
     await query(
-      `UPDATE unix_suppliers SET name=?, phone=?, location=?, payment_day=?, lead_time_days=?, notes=?
+      `UPDATE unix_suppliers SET name=?, phone=?, location=?, payment_day=?, lead_time_days=?, notes=?, is_internal=?
        WHERE id=?`,
-      [name, phone || null, location || null, payment_day || null, lead_time_days || 1, notes || null, req.params.id]
+      [name, phone || null, location || null, payment_day || null, lead_time_days || 1,
+       notes || null, is_internal ? 1 : 0, req.params.id]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -81,15 +86,23 @@ router.delete('/:id', async (req, res) => {
 // ── Ledger sub-routes ────────────────────────────────────────
 
 // GET /api/suppliers/:id/ledger  – full transaction history + running balance
+// Joins related_supplier_id → name so the UI can show "Paid to [Supplier X]".
 router.get('/:id/ledger', async (req, res) => {
   try {
     const entries = await query(
-      `SELECT * FROM unix_supplier_ledger WHERE supplier_id = ? ORDER BY transaction_date, created_at`,
+      `SELECT l.*,
+              rs.name AS related_supplier_name
+       FROM unix_supplier_ledger l
+       LEFT JOIN unix_suppliers rs ON rs.id = l.related_supplier_id
+       WHERE l.supplier_id = ?
+       ORDER BY l.transaction_date, l.created_at`,
       [req.params.id]
     );
     let balance = 0;
     const withBalance = entries.map(e => {
-      balance += e.transaction_type === 'PURCHASE' ? Number(e.amount) : -Number(e.amount);
+      // PURCHASE and SUPPLIER_PAYMENT both increase the account's spend (debit)
+      const isDebit = e.transaction_type === 'PURCHASE' || e.transaction_type === 'SUPPLIER_PAYMENT';
+      balance += isDebit ? Number(e.amount) : -Number(e.amount);
       return { ...e, running_balance: Number(balance.toFixed(2)) };
     });
     res.json(withBalance);
@@ -98,14 +111,16 @@ router.get('/:id/ledger', async (req, res) => {
   }
 });
 
-// POST /api/suppliers/:id/ledger  – record a PURCHASE or PAYMENT
+// POST /api/suppliers/:id/ledger  – manually record a PURCHASE, PAYMENT, or CASH_IN
+// SUPPLIER_PAYMENT is created automatically by the pay run disburse route.
+// CASH_IN is used on internal (manager) accounts to record bank withdrawals / float top-ups.
 router.post('/:id/ledger', async (req, res) => {
   const { transaction_type, amount, description, reference_doc, transaction_date } = req.body;
   if (!transaction_type || !amount || !transaction_date) {
     return res.status(400).json({ error: 'transaction_type, amount, and transaction_date are required' });
   }
-  if (!['PURCHASE', 'PAYMENT'].includes(transaction_type)) {
-    return res.status(400).json({ error: 'transaction_type must be PURCHASE or PAYMENT' });
+  if (!['PURCHASE', 'PAYMENT', 'CASH_IN'].includes(transaction_type)) {
+    return res.status(400).json({ error: 'transaction_type must be PURCHASE, PAYMENT, or CASH_IN' });
   }
   const id = uuidv4();
   try {
@@ -120,6 +135,212 @@ router.post('/:id/ledger', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// GET /api/suppliers/:id/statement
+// Returns a structured statement summary for a supplier.
+// Query params: ?days=30  (default: last 30 days)
+// Response includes opening balance, period totals, closing balance.
+// ─────────────────────────────────────────────────────────────
+router.get('/:id/statement', async (req, res) => {
+  try {
+    const supplier = await query('SELECT * FROM unix_suppliers WHERE id = ?', [req.params.id]);
+    if (!supplier.length) return res.status(404).json({ error: 'Supplier not found' });
+    const s = supplier[0];
+
+    const days = parseInt(req.query.days, 10) || 30;
+    const today = new Date();
+    const periodStart = new Date(today);
+    periodStart.setDate(today.getDate() - days);
+    const periodStartStr = periodStart.toISOString().slice(0, 10);
+    const todayStr = today.toISOString().slice(0, 10);
+
+    // Opening balance: all transactions BEFORE the period
+    const openRows = await query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT') THEN amount ELSE 0 END), 0)
+           - COALESCE(SUM(CASE WHEN transaction_type IN ('PAYMENT','CASH_IN') THEN amount ELSE 0 END), 0)
+           AS opening_balance
+       FROM unix_supplier_ledger
+       WHERE supplier_id = ? AND transaction_date < ?`,
+      [req.params.id, periodStartStr]
+    );
+    const openingBalance = Number(openRows[0].opening_balance);
+
+    // Period entries
+    const periodRows = await query(
+      `SELECT l.*, rs.name AS related_supplier_name
+       FROM unix_supplier_ledger l
+       LEFT JOIN unix_suppliers rs ON rs.id = l.related_supplier_id
+       WHERE l.supplier_id = ?
+         AND l.transaction_date >= ? AND l.transaction_date <= ?
+       ORDER BY l.transaction_date, l.created_at`,
+      [req.params.id, periodStartStr, todayStr]
+    );
+
+    let purchases = 0, supplierPayments = 0, payments = 0, cashIns = 0;
+    for (const r of periodRows) {
+      if (r.transaction_type === 'PURCHASE')         purchases        += Number(r.amount);
+      if (r.transaction_type === 'SUPPLIER_PAYMENT') supplierPayments += Number(r.amount);
+      if (r.transaction_type === 'PAYMENT')          payments         += Number(r.amount);
+      if (r.transaction_type === 'CASH_IN')          cashIns          += Number(r.amount);
+    }
+
+    const totalDebits   = purchases + supplierPayments;
+    const totalCredits  = payments + cashIns;
+    const closingBalance = openingBalance + totalDebits - totalCredits;
+
+    // Load business name for message formatting
+    const settingsRows = await query(
+      `SELECT setting_key, setting_value FROM unix_settings WHERE setting_key IN ('business_name','slogan')`
+    );
+    const sm = {};
+    settingsRows.forEach(r => sm[r.setting_key] = r.setting_value);
+
+    res.json({
+      supplier: { id: s.id, name: s.name, phone: s.phone, is_internal: !!s.is_internal },
+      period: { start: periodStartStr, end: todayStr, days },
+      opening_balance:          Number(openingBalance.toFixed(2)),
+      period_purchases:         Number(purchases.toFixed(2)),
+      period_supplier_payments: Number(supplierPayments.toFixed(2)),
+      period_payments:          Number(payments.toFixed(2)),
+      period_cash_ins:          Number(cashIns.toFixed(2)),
+      closing_balance:          Number(closingBalance.toFixed(2)),
+      entries: periodRows,
+      business_name: sm['business_name'] || 'Yunix Store',
+      slogan: sm['slogan'] || 'Powered by Yunix',
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// GET /api/suppliers/:id/statement/whatsapp
+// Generates a formatted WhatsApp mini-statement URL.
+// Query params: ?days=30
+// ─────────────────────────────────────────────────────────────
+router.get('/:id/statement/whatsapp', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days, 10) || 30;
+    // Reuse the statement logic by fetching from same DB
+    const supplier = await query('SELECT * FROM unix_suppliers WHERE id = ?', [req.params.id]);
+    if (!supplier.length) return res.status(404).json({ error: 'Supplier not found' });
+    const s = supplier[0];
+
+    const today = new Date();
+    const periodStart = new Date(today);
+    periodStart.setDate(today.getDate() - days);
+    const periodStartStr = periodStart.toISOString().slice(0, 10);
+    const todayStr = today.toISOString().slice(0, 10);
+
+    const openRows = await query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT') THEN amount ELSE 0 END), 0)
+           - COALESCE(SUM(CASE WHEN transaction_type IN ('PAYMENT','CASH_IN') THEN amount ELSE 0 END), 0)
+           AS opening_balance
+       FROM unix_supplier_ledger
+       WHERE supplier_id = ? AND transaction_date < ?`,
+      [req.params.id, periodStartStr]
+    );
+    const openingBalance = Number(openRows[0].opening_balance);
+
+    const periodRows = await query(
+      `SELECT transaction_type, amount FROM unix_supplier_ledger
+       WHERE supplier_id = ? AND transaction_date >= ? AND transaction_date <= ?`,
+      [req.params.id, periodStartStr, todayStr]
+    );
+
+    let purchases = 0, supplierPayments = 0, payments = 0, cashIns = 0;
+    for (const r of periodRows) {
+      if (r.transaction_type === 'PURCHASE')         purchases        += Number(r.amount);
+      if (r.transaction_type === 'SUPPLIER_PAYMENT') supplierPayments += Number(r.amount);
+      if (r.transaction_type === 'PAYMENT')          payments         += Number(r.amount);
+      if (r.transaction_type === 'CASH_IN')          cashIns          += Number(r.amount);
+    }
+    const closingBalance = openingBalance + purchases + supplierPayments - payments - cashIns;
+
+    const settingsRows = await query(
+      `SELECT setting_key, setting_value FROM unix_settings WHERE setting_key IN ('business_name','slogan')`
+    );
+    const sm = {};
+    settingsRows.forEach(r => sm[r.setting_key] = r.setting_value);
+    const busName = sm['business_name'] || 'Yunix Store';
+    const slogan  = sm['slogan']  || 'Powered by Yunix';
+
+    const fmt = (n) => `KES ${Math.abs(n).toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
+    const periodLabel = `${periodStartStr} to ${todayStr}`;
+
+    // Build mini-statement message (WhatsApp-friendly)
+    const isInternal = !!s.is_internal;
+    let lines;
+
+    if (isInternal) {
+      // Manager float statement: show full breakdown as requested in Phase 7
+      lines = [
+        `*MANAGER FLOAT STATEMENT – ${busName}*`,
+        ``,
+        `*${s.name}*`,
+        `Period: ${periodLabel} (last ${days} days)`,
+        ``,
+        `───────────────────────`,
+        `Opening Float:              ${fmt(openingBalance)}`,
+        ``,
+        `💰 Cash Received from Bank: ${fmt(cashIns)}`,
+        `🧾 Used to Pay Suppliers:   ${fmt(supplierPayments)}`,
+        `🛒 Ad-Hoc Expenses:         ${fmt(purchases)}`,
+        `↩️ Payments Reimbursed:     ${fmt(payments)}`,
+        `───────────────────────`,
+        `*Running Float Balance:  ${fmt(closingBalance)}*`,
+        closingBalance > 0
+          ? `_(Manager has ${fmt(closingBalance)} outstanding)_`
+          : `_(Float fully accounted for)_`,
+        ``,
+        `*${busName}*`,
+        `_${slogan}_`,
+      ];
+    } else {
+      // External supplier statement (unchanged)
+      lines = [
+        `*ACCOUNT STATEMENT – ${busName}*`,
+        ``,
+        `*${s.name}*`,
+        `Period: ${periodLabel} (last ${days} days)`,
+        ``,
+        `───────────────────────`,
+        `Opening Balance:   ${fmt(openingBalance)}`,
+        `Total Purchases:   ${fmt(purchases + supplierPayments)}`,
+        `Payments Received: ${fmt(payments)}`,
+        `───────────────────────`,
+        `*Closing Balance:  ${fmt(closingBalance)}*`,
+        closingBalance > 0 ? `_(Amount outstanding)_` : `_(Account settled)_`,
+        ``,
+        `*${busName}*`,
+        `_${slogan}_`,
+      ];
+    }
+
+    const message = lines.join('\r\n');
+
+    const encoded = encodeURIComponent(message)
+      .replace(/%0A/g, '%0D%0A')
+      .replace(/%0D%0D%0A/g, '%0D%0A');
+
+    let cleanPhone = (s.phone || '').replace(/[^0-9]/g, '');
+    if (cleanPhone.startsWith('0')) cleanPhone = '254' + cleanPhone.substring(1);
+    else if (cleanPhone.length === 9) cleanPhone = '254' + cleanPhone;
+
+    const whatsappUrl = cleanPhone
+      ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encoded}`
+      : `https://api.whatsapp.com/send?text=${encoded}`;
+
+    res.json({ ok: true, message, whatsapp_url: whatsappUrl });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/suppliers/alerts/upcoming-debt
 // Returns suppliers with balance due, sorted by urgency (payment_day nearest)
 router.get('/alerts/upcoming-debt', async (req, res) => {
@@ -127,8 +348,8 @@ router.get('/alerts/upcoming-debt', async (req, res) => {
     const rows = await query(`
       SELECT
         s.id, s.name, s.phone, s.payment_day, s.lead_time_days,
-        COALESCE(SUM(CASE WHEN l.transaction_type = 'PURCHASE' THEN l.amount ELSE 0 END), 0)
-          - COALESCE(SUM(CASE WHEN l.transaction_type = 'PAYMENT'  THEN l.amount ELSE 0 END), 0)
+        COALESCE(SUM(CASE WHEN l.transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT') THEN l.amount ELSE 0 END), 0)
+          - COALESCE(SUM(CASE WHEN l.transaction_type IN ('PAYMENT','CASH_IN') THEN l.amount ELSE 0 END), 0)
           AS balance_due
       FROM unix_suppliers s
       LEFT JOIN unix_supplier_ledger l ON l.supplier_id = s.id

@@ -83,33 +83,21 @@ class _RequisitionApprovalScreenState
 
   int get _pendingCount => _all.where((r) => r.isPending).length;
 
+  // Phase 8: Issue dialog — lets storekeeper adjust qty and add a note.
   Future<void> _issue(Requisition req) async {
-    final confirm = await showDialog<bool>(
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Confirm Issue'),
-        content: Text(
-          'Issue ${req.quantity.toStringAsFixed(req.quantity % 1 == 0 ? 0 : 1)} '
-          '${req.unitOfMeasure ?? req.itemUom ?? ''} of ${req.itemName}?\n\n'
-          'This will deduct the quantity from stock.',
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.paidGreen),
-            child: const Text('Yes, Issue'),
-          ),
-        ],
-      ),
+      builder: (_) => _IssueDialog(req: req),
     );
-    if (confirm != true) return;
+    if (result == null) return;
 
     try {
-      await ApiService.instance.issueRequisition(req.id, widget.staff.name);
+      await ApiService.instance.issueRequisition(
+        req.id,
+        widget.staff.name,
+        issuedQuantity: result['qty'] as double?,
+        issueNotes:     result['notes'] as String?,
+      );
       _showSuccess('Issued: ${req.itemName}');
       _loadRequisitions();
     } on ApiException catch (e) {
@@ -117,9 +105,15 @@ class _RequisitionApprovalScreenState
     }
   }
 
+  // Phase 8: Reject dialog — lets storekeeper provide a reason.
   Future<void> _reject(Requisition req) async {
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (_) => _RejectDialog(itemName: req.itemName),
+    );
+    if (reason == null) return; // cancelled
     try {
-      await ApiService.instance.rejectRequisition(req.id);
+      await ApiService.instance.rejectRequisition(req.id, reason: reason);
       _showSuccess('Rejected: ${req.itemName}');
       _loadRequisitions();
     } catch (e) {
@@ -434,17 +428,61 @@ class _RequisitionCard extends StatelessWidget {
                         ),
                     ],
                   ),
-                  // Issued by info
-                  if (req.isIssued && req.issuedBy != null)
+                  // Issued / adjusted info
+                  if (req.isIssued && req.issuedBy != null) ...[
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
-                      child: Text(
-                        'Issued by ${req.issuedBy}'
-                        '${req.issuedAt != null ? ' at ${_formatTime(req.issuedAt!)}' : ''}',
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.paidGreen.withOpacity(0.8)),
+                      child: RichText(
+                        text: TextSpan(
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.paidGreen.withOpacity(0.85)),
+                          children: [
+                            TextSpan(text: 'Issued by ${req.issuedBy}'),
+                            if (req.issuedAt != null)
+                              TextSpan(text: ' at ${_formatTime(req.issuedAt!)}'),
+                            // Show adjusted quantity if it differs from requested
+                            if (req.issuedQuantity != null &&
+                                req.issuedQuantity != req.quantity)
+                              TextSpan(
+                                text: '  ·  Adjusted: '
+                                    '${req.issuedQuantity!.toStringAsFixed(req.issuedQuantity! % 1 == 0 ? 0 : 1)}'
+                                    ' ${req.unitOfMeasure ?? req.itemUom ?? ''}'
+                                    ' (requested ${req.quantity.toStringAsFixed(req.quantity % 1 == 0 ? 0 : 1)})',
+                                style: const TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                          ],
+                        ),
                       ),
+                    ),
+                    if (req.issueNotes != null && req.issueNotes!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 3),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.notes_rounded,
+                              size: 13, color: Colors.grey.shade500),
+                          const SizedBox(width: 4),
+                          Text(req.issueNotes!,
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey.shade600,
+                                  fontStyle: FontStyle.italic)),
+                        ]),
+                      ),
+                  ],
+                  // Rejection reason
+                  if (req.isRejected && req.issueNotes != null && req.issueNotes!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.info_outline_rounded,
+                            size: 13, color: AppTheme.debtRed.withOpacity(0.7)),
+                        const SizedBox(width: 4),
+                        Text('Reason: ${req.issueNotes!}',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.debtRed.withOpacity(0.8),
+                                fontStyle: FontStyle.italic)),
+                      ]),
                     ),
                 ],
               ),
@@ -631,6 +669,174 @@ class _EmptyState extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 Dialogs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Issue dialog: allows the storekeeper to adjust the issued quantity
+/// and optionally add a note before confirming.
+class _IssueDialog extends StatefulWidget {
+  final Requisition req;
+  const _IssueDialog({required this.req});
+
+  @override
+  State<_IssueDialog> createState() => _IssueDialogState();
+}
+
+class _IssueDialogState extends State<_IssueDialog> {
+  late final TextEditingController _qtyCtrl;
+  final _notesCtrl = TextEditingController();
+  final _formKey   = GlobalKey<FormState>();
+
+  @override
+  void initState() {
+    super.initState();
+    final qty = widget.req.quantity;
+    _qtyCtrl = TextEditingController(
+      text: qty.toStringAsFixed(qty % 1 == 0 ? 0 : 1),
+    );
+  }
+
+  @override
+  void dispose() {
+    _qtyCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final req    = widget.req;
+    final uom    = req.unitOfMeasure ?? req.itemUom ?? '';
+    final reqQty = req.quantity;
+
+    return AlertDialog(
+      title: Row(children: [
+        const Icon(Icons.check_circle_rounded, color: AppTheme.paidGreen),
+        const SizedBox(width: 10),
+        Expanded(child: Text('Issue: ${req.itemName}',
+            overflow: TextOverflow.ellipsis)),
+      ]),
+      content: SizedBox(
+        width: 380,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Requested: ${reqQty.toStringAsFixed(reqQty % 1 == 0 ? 0 : 1)} $uom',
+                style: const TextStyle(color: AppTheme.pinMuted, fontSize: 13),
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _qtyCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: 'Issued Quantity ($uom)',
+                  prefixIcon: const Icon(Icons.straighten_rounded),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: const BorderSide(color: AppTheme.paidGreen, width: 2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                validator: (v) {
+                  if (v == null || v.isEmpty) return 'Required';
+                  final n = double.tryParse(v);
+                  if (n == null || n <= 0) return 'Enter a positive number';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _notesCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Note / Reason (optional)',
+                  prefixIcon: Icon(Icons.notes_rounded),
+                  hintText: 'e.g. Only 2 kg available',
+                ),
+                maxLines: 2,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.of(context).pop(null),
+            child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: () {
+            if (!_formKey.currentState!.validate()) return;
+            Navigator.of(context).pop({
+              'qty':   double.parse(_qtyCtrl.text.trim()),
+              'notes': _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+            });
+          },
+          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.paidGreen),
+          child: const Text('Confirm Issue'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Reject dialog: lets the storekeeper enter a reason before rejecting.
+class _RejectDialog extends StatefulWidget {
+  final String itemName;
+  const _RejectDialog({required this.itemName});
+
+  @override
+  State<_RejectDialog> createState() => _RejectDialogState();
+}
+
+class _RejectDialogState extends State<_RejectDialog> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(children: [
+        const Icon(Icons.cancel_rounded, color: AppTheme.debtRed),
+        const SizedBox(width: 10),
+        Expanded(child: Text('Reject: ${widget.itemName}',
+            overflow: TextOverflow.ellipsis)),
+      ]),
+      content: SizedBox(
+        width: 380,
+        child: TextField(
+          controller: _ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Rejection Reason (optional)',
+            prefixIcon: Icon(Icons.notes_rounded),
+            hintText: 'e.g. Out of stock until Thursday',
+          ),
+          maxLines: 3,
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.of(context).pop(null),
+            child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: () => Navigator.of(context).pop(_ctrl.text.trim()),
+          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.debtRed),
+          child: const Text('Reject'),
+        ),
+      ],
     );
   }
 }

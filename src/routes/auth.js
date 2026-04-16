@@ -60,8 +60,8 @@ router.post('/staff', async (req, res) => {
   if (!/^\d{4}$/.test(pin)) {
     return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
   }
-  if (!['kitchen', 'store', 'manager', 'owner'].includes(role)) {
-    return res.status(400).json({ error: 'role must be kitchen, store, manager, or owner' });
+  if (!['kitchen', 'store', 'manager', 'owner', 'ict_admin'].includes(role)) {
+    return res.status(400).json({ error: 'role must be kitchen, store, manager, owner, or ict_admin' });
   }
   try {
     const { v4: uuidv4 } = require('uuid');
@@ -91,8 +91,8 @@ router.put('/staff/:id', async (req, res) => {
   if (pin && !/^\d{4}$/.test(pin)) {
     return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
   }
-  if (!['kitchen', 'store', 'manager', 'owner'].includes(role)) {
-    return res.status(400).json({ error: 'role must be kitchen, store, manager, or owner' });
+  if (!['kitchen', 'store', 'manager', 'owner', 'ict_admin'].includes(role)) {
+    return res.status(400).json({ error: 'role must be kitchen, store, manager, owner, or ict_admin' });
   }
   try {
     if (pin) {

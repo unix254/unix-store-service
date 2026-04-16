@@ -1,7 +1,7 @@
 class Staff {
   final String id;
   final String name;
-  final String role; // 'kitchen' | 'store' | 'manager'
+  final String role; // 'kitchen' | 'store' | 'manager' | 'owner' | 'ict_admin'
   final List<String> capabilities;
   final String? locationName;
 
@@ -28,21 +28,30 @@ class Staff {
     );
   }
 
-  /// Role shortcuts (keep for backward compat)
-  bool get isStore   => role == 'store' || role == 'manager' || role == 'owner';
-  bool get isKitchen => role == 'kitchen';
-  bool get isManager => role == 'manager';
-  bool get isOwner   => role == 'owner';
+  /// Role shortcuts
+  bool get isStore    => role == 'store' || role == 'manager' || role == 'owner' || role == 'ict_admin';
+  bool get isKitchen  => role == 'kitchen';
+  bool get isManager  => role == 'manager';
+  bool get isOwner    => role == 'owner';
+  bool get isIctAdmin => role == 'ict_admin';
 
   /// Capability-based gating — DB capabilities are the sole source of truth.
   bool hasCapability(String cap) => capabilities.contains(cap);
 
-  bool get canApproveRequisitions => hasCapability('can_approve_requisitions');
-  bool get canManageInventory     => hasCapability('can_manage_inventory');
-  bool get canDraftPO             => hasCapability('can_draft_po');
-  bool get canApprovePayRun       => hasCapability('can_approve_payrun');
-  bool get canLogWaste            => true; // every staff member may log waste
-  bool get canManageStaff         => hasCapability('can_manage_staff');
-  bool get canViewVariance        => hasCapability('can_view_variance');
-  bool get canManageSettings      => hasCapability('can_manage_settings');
+  // ── Existing capabilities ─────────────────────────────────────
+  bool get canApproveRequisitions   => hasCapability('can_approve_requisitions');
+  bool get canManageInventory       => hasCapability('can_manage_inventory');
+  bool get canDraftPO               => hasCapability('can_draft_po');
+  bool get canApprovePayRun         => hasCapability('can_approve_payrun');
+  bool get canLogWaste              => true; // every staff member may log waste
+  bool get canManageStaff           => hasCapability('can_manage_staff');
+  bool get canViewVariance          => hasCapability('can_view_variance');
+  bool get canManageSettings        => hasCapability('can_manage_settings');
+
+  // ── New capabilities (Phase 10) ──────────────────────────────
+  bool get canDeleteInventory       => hasCapability('can_delete_inventory')    || isManager || isOwner;
+  bool get canManageYieldConfig     => hasCapability('can_manage_yield_config') || isManager || isOwner;
+  bool get canManageProcurement     => hasCapability('can_manage_procurement')  || isManager || isOwner;
+  /// Access to Expense Accounts (manager float / Cash-In workflows).
+  bool get canManageExpenseAccounts => hasCapability('can_manage_expense_accounts') || isManager || isOwner;
 }

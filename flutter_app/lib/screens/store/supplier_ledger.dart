@@ -257,6 +257,9 @@ class _SupplierListState extends State<_SupplierList> {
                             final isSelected = widget.selected?.id == s.id;
                             return ListTile(
                               selected: isSelected,
+                              tileColor: s.isInternal
+                                  ? const Color(0xFFFFF8E1)
+                                  : null,
                               selectedTileColor:
                                   AppTheme.primary.withOpacity(0.08),
                               onTap: () => widget.onSelect(s),
@@ -274,10 +277,27 @@ class _SupplierListState extends State<_SupplierList> {
                                   ),
                                 ),
                               ),
-                              title: Text(s.name,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 14)),
+                              title: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Flexible(child: Text(s.name,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 14))),
+                                  if (s.isInternal) ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFFF8F00),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: const Text('Internal',
+                                          style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700)),
+                                    ),
+                                  ],
+                                ],
+                              ),
                               subtitle: Text(s.location ?? 'No location',
                                   style: const TextStyle(fontSize: 12)),
                               trailing: _BalanceChip(amount: s.balanceDue),
@@ -357,6 +377,24 @@ class _SupplierDetailState extends State<_SupplierDetail> {
       context: context,
       builder: (_) => _OrderDialog(supplier: widget.supplier),
     );
+  }
+
+  Future<void> _sendMiniStatement() async {
+    try {
+      final result = await ApiService.instance
+          .getSupplierStatementWhatsApp(widget.supplier.id);
+      final url = result['whatsapp_url'] as String?;
+      if (url != null) {
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          widget.onError('Could not open WhatsApp');
+        }
+      }
+    } catch (e) {
+      widget.onError(e.toString());
+    }
   }
 
   Future<void> _editSupplier() async {
@@ -441,6 +479,7 @@ class _SupplierDetailState extends State<_SupplierDetail> {
                     style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.paidGreen),
                   ),
+                  // Cash-In is managed in the dedicated Expense Accounts screen.
                   OutlinedButton.icon(
                     onPressed: _sendOrder,
                     icon: const Icon(Icons.send_rounded, size: 18),
@@ -450,6 +489,24 @@ class _SupplierDetailState extends State<_SupplierDetail> {
                     onPressed: _editSupplier,
                     icon: const Icon(Icons.edit_rounded, size: 18),
                     label: const Text('Edit'),
+                  ),
+                  // ── Statement actions
+                  OutlinedButton.icon(
+                    onPressed: _sendMiniStatement,
+                    icon: const Icon(Icons.chat_rounded, size: 18, color: Color(0xFF25D366)),
+                    label: const Text('Send Statement via WhatsApp'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF25D366),
+                      side: const BorderSide(color: Color(0xFF25D366)),
+                    ),
+                  ),
+                  Tooltip(
+                    message: 'PDF statement – coming soon',
+                    child: OutlinedButton.icon(
+                      onPressed: null, // disabled – foundation for future PDF
+                      icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
+                      label: const Text('Print Full Statement'),
+                    ),
                   ),
                 ],
               ),
@@ -512,17 +569,40 @@ class _LedgerTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Show "Paid To" column only when any entry links back to an external supplier
+    // (i.e. SUPPLIER_PAYMENT rows on manager/internal accounts).
+    final hasRelated = entries.any((e) => e.relatedSupplierName != null);
+
+    // Column indices & widths — kept narrow so the row fits without horizontal scroll
+    // when hasRelated is false. When true, a horizontal scroll view handles overflow.
+    final colWidths = <int, TableColumnWidth>{
+      0: const FixedColumnWidth(100), // Date
+      1: const FixedColumnWidth(130), // Type badge
+      2: const FixedColumnWidth(120), // Amount
+      3: const FixedColumnWidth(200), // Description (fixed, not flex — avoids layout flicker)
+      if (hasRelated) 4: const FixedColumnWidth(140), // Paid To
+      if (hasRelated) 5: const FixedColumnWidth(80) else 4: const FixedColumnWidth(80),   // Ref
+      if (hasRelated) 6: const FixedColumnWidth(130) else 5: const FixedColumnWidth(130), // Balance
+    };
+
+    final headers = [
+      'Date', 'Type', 'Amount', 'Description',
+      if (hasRelated) 'Paid To', // short, readable, no typo
+      'Ref', 'Balance',
+    ];
+
+    final reversedEntries = entries.reversed.toList();
+
+    // Wrap in horizontal scroll so wide rows never clip outside the panel.
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-      child: Table(
-        columnWidths: const {
-          0: FixedColumnWidth(120),
-          1: FixedColumnWidth(110),
-          2: FixedColumnWidth(140),
-          3: FlexColumnWidth(),
-          4: FixedColumnWidth(80),
-          5: FixedColumnWidth(140),
-        },
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 0),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.vertical,
+        padding: const EdgeInsets.only(bottom: 24),
+        child: Table(
+          defaultColumnWidth: const IntrinsicColumnWidth(),
+          columnWidths: colWidths,
         children: [
           // Header
           TableRow(
@@ -530,7 +610,7 @@ class _LedgerTable extends StatelessWidget {
               border: Border(
                   bottom: BorderSide(color: Colors.grey.shade200, width: 2)),
             ),
-            children: ['Date', 'Type', 'Amount', 'Description', 'Ref', 'Running Balance']
+            children: headers
                 .map((h) => Padding(
                       padding: const EdgeInsets.symmetric(
                           vertical: 10, horizontal: 8),
@@ -542,10 +622,10 @@ class _LedgerTable extends StatelessWidget {
                     ))
                 .toList(),
           ),
-          // Rows (newest first display)
-          ...entries.reversed.map((e) => TableRow(
+          // Rows (newest first)
+          ...reversedEntries.map((e) => TableRow(
                 decoration: BoxDecoration(
-                  color: entries.reversed.toList().indexOf(e).isEven
+                  color: reversedEntries.indexOf(e).isEven
                       ? Colors.transparent
                       : AppTheme.scaffold,
                   border: Border(
@@ -567,7 +647,7 @@ class _LedgerTable extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.symmetric(
                         vertical: 8, horizontal: 8),
-                    child: _TypeBadge(isPurchase: e.isPurchase),
+                    child: _TypeBadge(type: e.transactionType),
                   ),
                   // Amount
                   Padding(
@@ -578,9 +658,12 @@ class _LedgerTable extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: e.isPurchase
-                            ? AppTheme.debtRed
-                            : AppTheme.paidGreen,
+                        // CASH_IN shows in blue (bank withdrawal credit)
+                        color: e.isCashIn
+                            ? const Color(0xFF1565C0)
+                            : e.isDebit
+                                ? AppTheme.debtRed
+                                : AppTheme.paidGreen,
                       ),
                     ),
                   ),
@@ -593,6 +676,31 @@ class _LedgerTable extends StatelessWidget {
                             const TextStyle(fontSize: 13, color: Colors.black87),
                         overflow: TextOverflow.ellipsis),
                   ),
+                  // Related Supplier (only if column shown)
+                  if (hasRelated)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 12, horizontal: 8),
+                      child: e.relatedSupplierName != null
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.link_rounded,
+                                    size: 13, color: Colors.deepPurple),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(e.relatedSupplierName!,
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.deepPurple,
+                                          fontWeight: FontWeight.w600),
+                                      overflow: TextOverflow.ellipsis),
+                                ),
+                              ],
+                            )
+                          : const Text('–',
+                              style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    ),
                   // Ref
                   Padding(
                     padding: const EdgeInsets.symmetric(
@@ -621,8 +729,9 @@ class _LedgerTable extends StatelessWidget {
                 ],
               )),
         ],
-      ),
-    );
+        ), // Closes Table
+      ),   // Closes inner SingleChildScrollView
+    );     // Closes outer SingleChildScrollView
   }
 }
 
@@ -679,15 +788,43 @@ class _AddEntryDialogState extends State<_AddEntryDialog> {
   @override
   Widget build(BuildContext context) {
     final isPurchase = widget.type == 'PURCHASE';
+    final isCashIn   = widget.type == 'CASH_IN';
+
+    // Colour + label per transaction type
+    final accentColor = isPurchase
+        ? AppTheme.debtRed
+        : isCashIn
+            ? const Color(0xFF1565C0)   // deep blue for bank cash-in
+            : AppTheme.paidGreen;
+
+    final titleIcon = isPurchase
+        ? Icons.add_shopping_cart_rounded
+        : isCashIn
+            ? Icons.account_balance_rounded
+            : Icons.payments_rounded;
+
+    final titleText = isPurchase
+        ? 'Record Purchase'
+        : isCashIn
+            ? 'Record Cash-In (Bank Withdrawal)'
+            : 'Record Payment';
+
+    final saveLabel = isPurchase
+        ? 'Save Purchase'
+        : isCashIn
+            ? 'Save Cash-In'
+            : 'Save Payment';
+
+    final refLabel = isCashIn
+        ? 'Bank Ref / Cheque No. (optional)'
+        : 'Invoice / Receipt Ref (optional)';
+
     return AlertDialog(
       title: Row(
         children: [
-          Icon(
-            isPurchase ? Icons.add_shopping_cart_rounded : Icons.payments_rounded,
-            color: isPurchase ? AppTheme.debtRed : AppTheme.paidGreen,
-          ),
+          Icon(titleIcon, color: accentColor),
           const SizedBox(width: 10),
-          Text(isPurchase ? 'Record Purchase' : 'Record Payment'),
+          Text(titleText),
         ],
       ),
       content: SizedBox(
@@ -703,9 +840,7 @@ class _AddEntryDialogState extends State<_AddEntryDialog> {
                   labelText: 'Amount (KES)',
                   prefixIcon: const Icon(Icons.attach_money_rounded),
                   focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(
-                        color: isPurchase ? AppTheme.debtRed : AppTheme.paidGreen,
-                        width: 2),
+                    borderSide: BorderSide(color: accentColor, width: 2),
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
@@ -740,9 +875,9 @@ class _AddEntryDialogState extends State<_AddEntryDialog> {
               const SizedBox(height: 14),
               TextFormField(
                 controller: _refCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Invoice / Receipt Ref (optional)',
-                  prefixIcon: Icon(Icons.receipt_rounded),
+                decoration: InputDecoration(
+                  labelText: refLabel,
+                  prefixIcon: const Icon(Icons.receipt_rounded),
                 ),
               ),
             ],
@@ -755,16 +890,14 @@ class _AddEntryDialogState extends State<_AddEntryDialog> {
             child: const Text('Cancel')),
         ElevatedButton(
           onPressed: _saving ? null : _save,
-          style: ElevatedButton.styleFrom(
-              backgroundColor:
-                  isPurchase ? AppTheme.debtRed : AppTheme.paidGreen),
+          style: ElevatedButton.styleFrom(backgroundColor: accentColor),
           child: _saving
               ? const SizedBox(
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white))
-              : Text(isPurchase ? 'Save Purchase' : 'Save Payment'),
+              : Text(saveLabel),
         ),
       ],
     );
@@ -793,7 +926,8 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
   late TextEditingController _locationCtrl;
   late TextEditingController _leadTimeCtrl;
   late TextEditingController _notesCtrl;
-  String? _payDay;   // structured dropdown value
+  String? _payDay;
+  bool _isInternal = false;
   bool _saving = false;
 
   @override
@@ -805,10 +939,10 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
     _locationCtrl = TextEditingController(text: s?.location ?? '');
     _leadTimeCtrl = TextEditingController(text: s?.leadTimeDays.toString() ?? '1');
     _notesCtrl    = TextEditingController(text: s?.notes ?? '');
-    // Seed dropdown — if existing value isn't in the list, ignore (treat as unset)
     _payDay = (s?.paymentDay != null && _kPaymentDays.contains(s!.paymentDay))
         ? s.paymentDay
         : null;
+    _isInternal = s?.isInternal ?? false;
   }
 
   @override
@@ -830,6 +964,7 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
       'payment_day':   _payDay ?? '',
       'lead_time_days': int.tryParse(_leadTimeCtrl.text.trim()) ?? 1,
       'notes':         _notesCtrl.text.trim(),
+      'is_internal':   _isInternal,
     };
 
     try {
@@ -859,20 +994,54 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Internal account toggle
+                Container(
+                  decoration: BoxDecoration(
+                    color: _isInternal
+                        ? const Color(0xFFFFF8E1)
+                        : Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _isInternal
+                          ? const Color(0xFFFF8F00)
+                          : Colors.grey.shade300,
+                    ),
+                  ),
+                  child: SwitchListTile(
+                    dense: true,
+                    value: _isInternal,
+                    activeColor: const Color(0xFFFF8F00),
+                    title: const Text('Internal Expense Account',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                    subtitle: Text(
+                      _isInternal
+                          ? 'This supplier represents a manager who holds business cash.'
+                          : 'Toggle on if this is a manager cash account, not an external vendor.',
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                    ),
+                    onChanged: (v) => setState(() => _isInternal = v),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 TextFormField(
                   controller: _nameCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Supplier Name *',
-                      prefixIcon: Icon(Icons.business_rounded)),
+                  decoration: InputDecoration(
+                      labelText: _isInternal ? 'Account Name *' : 'Supplier Name *',
+                      hintText: _isInternal ? 'e.g. Nairobi Manager – John' : '',
+                      prefixIcon: Icon(_isInternal
+                          ? Icons.account_balance_wallet_rounded
+                          : Icons.business_rounded)),
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Name is required' : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _phoneCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Phone (for WhatsApp/SMS)',
-                      prefixIcon: Icon(Icons.phone_rounded)),
+                  decoration: InputDecoration(
+                      labelText: _isInternal
+                          ? 'Manager Phone (WhatsApp)'
+                          : 'Phone (for WhatsApp/SMS)',
+                      prefixIcon: const Icon(Icons.phone_rounded)),
                   keyboardType: TextInputType.phone,
                 ),
                 const SizedBox(height: 12),
@@ -882,39 +1051,41 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
                       labelText: 'Location / Town',
                       prefixIcon: Icon(Icons.location_on_rounded)),
                 ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String?>(
-                        value: _payDay,
-                        decoration: const InputDecoration(
-                          labelText: 'Payment Day',
-                          prefixIcon: Icon(Icons.calendar_today_rounded),
+                if (!_isInternal) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String?>(
+                          value: _payDay,
+                          decoration: const InputDecoration(
+                            labelText: 'Payment Day',
+                            prefixIcon: Icon(Icons.calendar_today_rounded),
+                          ),
+                          items: [
+                            const DropdownMenuItem<String?>(
+                                value: null,
+                                child: Text('— Not scheduled —',
+                                    style: TextStyle(color: Colors.grey))),
+                            ..._kPaymentDays.map((d) =>
+                                DropdownMenuItem<String?>(value: d, child: Text(d))),
+                          ],
+                          onChanged: (v) => setState(() => _payDay = v),
                         ),
-                        items: [
-                          const DropdownMenuItem<String?>(
-                              value: null,
-                              child: Text('— Not scheduled —',
-                                  style: TextStyle(color: Colors.grey))),
-                          ..._kPaymentDays.map((d) =>
-                              DropdownMenuItem<String?>(value: d, child: Text(d))),
-                        ],
-                        onChanged: (v) => setState(() => _payDay = v),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextFormField(
-                        controller: _leadTimeCtrl,
-                        decoration: const InputDecoration(
-                            labelText: 'Lead Time (days)',
-                            prefixIcon: Icon(Icons.local_shipping_rounded)),
-                        keyboardType: TextInputType.number,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _leadTimeCtrl,
+                          decoration: const InputDecoration(
+                              labelText: 'Lead Time (days)',
+                              prefixIcon: Icon(Icons.local_shipping_rounded)),
+                          keyboardType: TextInputType.number,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _notesCtrl,
@@ -1251,27 +1422,64 @@ class _InfoChip extends StatelessWidget {
   }
 }
 
+// _TypeBadge – handles PURCHASE, PAYMENT, SUPPLIER_PAYMENT, and CASH_IN.
 class _TypeBadge extends StatelessWidget {
-  final bool isPurchase;
-  const _TypeBadge({required this.isPurchase});
+  final String type;
+  const _TypeBadge({required this.type});
 
   @override
   Widget build(BuildContext context) {
+    final Color bg;
+    final Color fg;
+    final String label;
+    final IconData icon;
+
+    switch (type) {
+      case 'SUPPLIER_PAYMENT':
+        bg = Colors.deepPurple.withOpacity(0.1);
+        fg = Colors.deepPurple;
+        label = 'SUPP. PAYMENT';
+        icon = Icons.swap_horiz_rounded;
+        break;
+      case 'PAYMENT':
+        bg = AppTheme.paidGreen.withOpacity(0.1);
+        fg = AppTheme.paidGreen;
+        label = 'PAYMENT';
+        icon = Icons.check_circle_outline_rounded;
+        break;
+      case 'CASH_IN':
+        bg = const Color(0xFF1565C0).withOpacity(0.1);
+        fg = const Color(0xFF1565C0);
+        label = 'CASH IN';
+        icon = Icons.account_balance_rounded;
+        break;
+      default: // PURCHASE
+        bg = AppTheme.debtRed.withOpacity(0.1);
+        fg = AppTheme.debtRed;
+        label = 'PURCHASE';
+        icon = Icons.shopping_cart_outlined;
+    }
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
       decoration: BoxDecoration(
-        color: isPurchase
-            ? AppTheme.debtRed.withOpacity(0.1)
-            : AppTheme.paidGreen.withOpacity(0.1),
+        color: bg,
         borderRadius: BorderRadius.circular(6),
       ),
-      child: Text(
-        isPurchase ? 'PURCHASE' : 'PAYMENT',
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: isPurchase ? AppTheme.debtRed : AppTheme.paidGreen,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 11, color: fg),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: fg,
+            ),
+          ),
+        ],
       ),
     );
   }

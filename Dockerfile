@@ -1,5 +1,4 @@
-# ── Stage 1: Build Flutter Web ─────────────────────────────────────────────
-FROM ghcr.io/cirruslabs/flutter:3.22.0 AS flutter-builder
+FROM ghcr.io/cirruslabs/flutter:stable AS flutter-builder
 
 WORKDIR /flutter_app
 
@@ -9,7 +8,7 @@ RUN flutter pub get && flutter precache --web
 
 # Copy rest of Flutter source and build
 COPY flutter_app/ .
-RUN flutter build web --release --base-href /
+RUN flutter build web --release --base-href / -v
 
 # ── Stage 2: Node.js Runtime ───────────────────────────────────────────────
 FROM node:20-alpine
