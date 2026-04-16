@@ -39,19 +39,23 @@ class Staff {
   bool hasCapability(String cap) => capabilities.contains(cap);
 
   // ── Existing capabilities ─────────────────────────────────────
-  bool get canApproveRequisitions   => hasCapability('can_approve_requisitions');
+  // Pattern A: capability only (no manager/owner fallback)
   bool get canManageInventory       => hasCapability('can_manage_inventory');
   bool get canDraftPO               => hasCapability('can_draft_po');
-  bool get canApprovePayRun         => hasCapability('can_approve_payrun');
   bool get canLogWaste              => true; // every staff member may log waste
   bool get canManageStaff           => hasCapability('can_manage_staff');
-  bool get canViewVariance          => hasCapability('can_view_variance');
   bool get canManageSettings        => hasCapability('can_manage_settings');
 
-  // ── New capabilities (Phase 10) ──────────────────────────────
-  bool get canDeleteInventory       => hasCapability('can_delete_inventory')    || isManager || isOwner;
-  bool get canManageYieldConfig     => hasCapability('can_manage_yield_config') || isManager || isOwner;
-  bool get canManageProcurement     => hasCapability('can_manage_procurement')  || isManager || isOwner;
+  // Pattern B: capability OR manager/owner fallback
+  bool get canApproveRequisitions   => hasCapability('can_approve_requisitions') || isManager || isOwner;
+  bool get canApprovePayRun         => hasCapability('can_approve_payrun')       || isManager || isOwner;
+  bool get canViewVariance          => hasCapability('can_view_variance')        || isManager || isOwner;
+
+  // ── New capabilities (Phase 10/11) ───────────────────────────
+  bool get canDeleteInventory       => hasCapability('can_delete_inventory')       || isManager || isOwner;
+  bool get canManageYieldConfig     => hasCapability('can_manage_yield_config')    || isManager || isOwner;
+  bool get canManageProcurement     => hasCapability('can_manage_procurement')     || isManager || isOwner;
+  bool get canManageCycleCount      => hasCapability('can_manage_cycle_count')     || isManager || isOwner;
   /// Access to Expense Accounts (manager float / Cash-In workflows).
   bool get canManageExpenseAccounts => hasCapability('can_manage_expense_accounts') || isManager || isOwner;
 }

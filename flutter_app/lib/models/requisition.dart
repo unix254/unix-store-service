@@ -1,6 +1,6 @@
 class Requisition {
   final String id;
-  final String inventoryItemId;
+  final String? inventoryItemId; // null for new-item requests
   final String itemName;
   final String? itemUom;
   final double quantity;
@@ -19,7 +19,7 @@ class Requisition {
 
   const Requisition({
     required this.id,
-    required this.inventoryItemId,
+    this.inventoryItemId,
     required this.itemName,
     this.itemUom,
     required this.quantity,
@@ -37,8 +37,8 @@ class Requisition {
 
   factory Requisition.fromJson(Map<String, dynamic> j) => Requisition(
         id:               j['id'] as String,
-        inventoryItemId:  j['inventory_item_id'] as String,
-        itemName:         j['item_name'] as String? ?? 'Unknown',
+        inventoryItemId:  j['inventory_item_id'] as String?,
+        itemName:         j['item_name'] as String? ?? '[New Item Request]',
         itemUom:          j['item_uom'] as String?,
         quantity:         double.tryParse(j['quantity']?.toString() ?? '0') ?? 0,
         unitOfMeasure:    j['unit_of_measure'] as String?,
@@ -53,9 +53,24 @@ class Requisition {
         issueNotes:       j['issue_notes'] as String?,
       );
 
-  bool get isPending  => status == 'Pending';
-  bool get isIssued   => status == 'Issued';
-  bool get isRejected => status == 'Rejected';
-  bool get isSales    => purpose == 'Sales';
+  bool get isPending   => status == 'Pending';
+  bool get isIssued    => status == 'Issued';
+  bool get isRejected  => status == 'Rejected';
+  bool get isSales     => purpose == 'Sales';
   bool get isStaffMeal => purpose == 'Staff Meal';
+
+  /// True when this requisition is a kitchen "new item" request (no inventory_item_id).
+  bool get isNewItemRequest =>
+      inventoryItemId == null &&
+      notes != null &&
+      notes!.startsWith('[NEW ITEM REQUEST]');
+
+  /// Parses the item name from the structured notes prefix.
+  /// e.g. "[NEW ITEM REQUEST] Name: Jasmine Rice | Qty: 5 kg | Notes: urgent"
+  /// Returns null if not a new item request or notes are malformed.
+  String? get newItemName {
+    if (!isNewItemRequest) return null;
+    final match = RegExp(r'Name:\s*([^|]+)').firstMatch(notes!);
+    return match?.group(1)?.trim();
+  }
 }

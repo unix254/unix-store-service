@@ -8,17 +8,26 @@ CREATE TABLE IF NOT EXISTS unix_migrations (
   applied_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-INSERT IGNORE INTO unix_migrations (filename) VALUES
-  ('001_init_unix_schema.sql'),
-  ('002_add_staff_pins.sql'),
-  ('003_milestone6.sql'),
-  ('004_purchase_orders.sql'),
-  ('005_add_owner_role.sql'),
-  ('006_business_settings.sql'),
-  ('007_owner_contact.sql'),
-  ('008_internal_suppliers.sql'),
-  ('009_supplier_statements.sql'),
-  ('010_cash_in.sql'),
-  ('011_requisition_adjustments.sql'),
-  ('012_feature_flags.sql'),
-  ('013_add_ict_admin_role.sql');
+-- Only insert the legacy files as "already applied" IF the original unix schema was 
+-- already deployed (which we detect by the existence of unix_staff).
+-- This protects fresh production installations from skipping crucial migrations.
+INSERT IGNORE INTO unix_migrations (filename)
+SELECT m.filename FROM (
+  SELECT '001_init_unix_schema.sql' AS filename
+  UNION SELECT '002_add_staff_pins.sql'
+  UNION SELECT '003_milestone6.sql'
+  UNION SELECT '004_purchase_orders.sql'
+  UNION SELECT '005_add_owner_role.sql'
+  UNION SELECT '006_business_settings.sql'
+  UNION SELECT '007_owner_contact.sql'
+  UNION SELECT '008_internal_suppliers.sql'
+  UNION SELECT '009_supplier_statements.sql'
+  UNION SELECT '010_cash_in.sql'
+  UNION SELECT '011_requisition_adjustments.sql'
+  UNION SELECT '012_feature_flags.sql'
+  UNION SELECT '013_add_ict_admin_role.sql'
+) AS m
+WHERE EXISTS (
+  SELECT 1 FROM information_schema.tables 
+  WHERE table_schema = DATABASE() AND table_name = 'unix_staff'
+);

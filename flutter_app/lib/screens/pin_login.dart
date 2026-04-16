@@ -467,7 +467,7 @@ class _StaffGrid extends StatelessWidget {
       case 'owner':     return 'Owner';
       case 'manager':   return 'Manager';
       case 'store':     return 'Storekeeper';
-      case 'ict_admin': return 'ICT Admin';
+      case 'ict_admin': return 'ICT';
       default:          return 'Kitchen';
     }
   }

@@ -581,6 +581,10 @@ class _LedgerRow extends StatelessWidget {
       typeColor = AppTheme.debtRed;
       typeIcon  = Icons.shopping_cart_rounded;
       typeLabel = 'Expense';
+    } else if (e.isOtherExpense) {
+      typeColor = const Color(0xFF7B1FA2);
+      typeIcon  = Icons.receipt_outlined;
+      typeLabel = 'Other Expense';
     } else {
       typeColor = AppTheme.paidGreen;
       typeIcon  = Icons.payments_rounded;
@@ -902,25 +906,23 @@ class _ExpenseDialogState extends State<_ExpenseDialog> {
                       fontWeight: FontWeight.w600)),
             ),
             const SizedBox(height: 8),
-            Row(children: [
-              for (final (val, label) in [
-                ('SUPPLIER_PAYMENT', '🧾 Paid a Supplier'),
-                ('PURCHASE', '🛒 Ad-Hoc Purchase'),
-              ])
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label:
-                          Text(label, style: const TextStyle(fontSize: 12)),
-                      selected: _type == val,
-                      onSelected: (_) => setState(() => _type = val),
-                      selectedColor:
-                          const Color(0xFFF57C00).withOpacity(0.2),
-                    ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final (val, label) in [
+                  ('SUPPLIER_PAYMENT', '🧾 Paid a Supplier'),
+                  ('PURCHASE', '🛒 Ad-Hoc Purchase'),
+                  ('OTHER_EXPENSE', '📋 Other Expense'),
+                ])
+                  ChoiceChip(
+                    label: Text(label, style: const TextStyle(fontSize: 12)),
+                    selected: _type == val,
+                    onSelected: (_) => setState(() => _type = val),
+                    selectedColor: const Color(0xFFF57C00).withOpacity(0.2),
                   ),
-                ),
-            ]),
+              ],
+            ),
             const SizedBox(height: 14),
 
             // Amount
@@ -963,7 +965,9 @@ class _ExpenseDialogState extends State<_ExpenseDialog> {
               decoration: InputDecoration(
                 labelText: _type == 'SUPPLIER_PAYMENT'
                     ? 'Supplier / Payee'
-                    : 'Description *',
+                    : _type == 'OTHER_EXPENSE'
+                        ? 'Expense Description *'
+                        : 'Description *',
                 prefixIcon: const Icon(Icons.notes_rounded),
                 border: const OutlineInputBorder(),
               ),

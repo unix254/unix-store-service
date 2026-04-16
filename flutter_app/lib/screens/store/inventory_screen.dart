@@ -163,12 +163,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
       children: [
         // ── Header ────────────────────────────────────────────
         _InventoryHeader(
-          totalItems:    _items.length,
-          reorderCount:  _reorderCount,
-          onAdd:         () => _showItemDialog(),
-          onRefresh:     _loadData,
-          isManager:     widget.staff.isManager,
-          onCycleCount:  _startCycleCount,
+          totalItems:        _items.length,
+          reorderCount:      _reorderCount,
+          onAdd:             () => _showItemDialog(),
+          onRefresh:         _loadData,
+          canManageCycleCount: widget.staff.canManageCycleCount,
+          onCycleCount:      _startCycleCount,
         ),
 
         // ── Search + Filter bar ────────────────────────────────
@@ -192,6 +192,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       onAdjust:   _showAdjustDialog,
                       onLogWaste: _showLogWasteDialog,
                       onDelete:   _deleteItem,
+                      canDelete:  widget.staff.canDeleteInventory,
                     ),
         ),
       ],
@@ -208,7 +209,7 @@ class _InventoryHeader extends StatelessWidget {
   final int reorderCount;
   final VoidCallback onAdd;
   final VoidCallback onRefresh;
-  final bool isManager;
+  final bool canManageCycleCount;
   final VoidCallback onCycleCount;
 
   const _InventoryHeader({
@@ -216,7 +217,7 @@ class _InventoryHeader extends StatelessWidget {
     required this.reorderCount,
     required this.onAdd,
     required this.onRefresh,
-    required this.isManager,
+    required this.canManageCycleCount,
     required this.onCycleCount,
   });
 
@@ -250,8 +251,8 @@ class _InventoryHeader extends StatelessWidget {
             tooltip: 'Refresh',
             color: AppTheme.primary,
           ),
-          // Cycle count — manager only
-          if (isManager) ...[
+          // Cycle count — gated by canManageCycleCount capability
+          if (canManageCycleCount) ...[
             OutlinedButton.icon(
               onPressed: onCycleCount,
               icon: const Icon(Icons.fact_check_rounded, size: 18),
@@ -397,6 +398,7 @@ class _InventoryTable extends StatelessWidget {
   final void Function(InventoryItem) onAdjust;
   final void Function(InventoryItem) onLogWaste;
   final void Function(InventoryItem) onDelete;
+  final bool canDelete;
 
   const _InventoryTable({
     required this.items,
@@ -404,6 +406,7 @@ class _InventoryTable extends StatelessWidget {
     required this.onAdjust,
     required this.onLogWaste,
     required this.onDelete,
+    required this.canDelete,
   });
 
   @override
@@ -537,13 +540,14 @@ class _InventoryTable extends StatelessWidget {
                       color: Colors.orange.shade700,
                       onTap: () => onLogWaste(item),
                     ),
-                    // Delete
-                    _ActionBtn(
-                      icon: Icons.delete_outline_rounded,
-                      tooltip: 'Delete item',
-                      color: AppTheme.debtRed,
-                      onTap: () => onDelete(item),
-                    ),
+                    // Delete (gated by canDeleteInventory)
+                    if (canDelete)
+                      _ActionBtn(
+                        icon: Icons.delete_outline_rounded,
+                        tooltip: 'Delete item',
+                        color: AppTheme.debtRed,
+                        onTap: () => onDelete(item),
+                      ),
                   ],
                 )),
               ],

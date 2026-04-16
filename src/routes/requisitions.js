@@ -10,7 +10,7 @@ router.get('/', async (req, res) => {
   let sql = `
     SELECT r.*, i.name AS item_name, i.unit_of_measure AS item_uom
     FROM unix_requisitions r
-    JOIN unix_store_inventory i ON i.id = r.inventory_item_id
+    LEFT JOIN unix_store_inventory i ON i.id = r.inventory_item_id
     WHERE 1=1
   `;
   const params = [];
@@ -33,7 +33,7 @@ router.get('/pending', async (req, res) => {
     const rows = await query(`
       SELECT r.*, i.name AS item_name, i.unit_of_measure AS item_uom
       FROM unix_requisitions r
-      JOIN unix_store_inventory i ON i.id = r.inventory_item_id
+      LEFT JOIN unix_store_inventory i ON i.id = r.inventory_item_id
       WHERE r.status = 'Pending'
       ORDER BY r.requested_at ASC
     `);
@@ -49,7 +49,7 @@ router.get('/:id', async (req, res) => {
     const rows = await query(
       `SELECT r.*, i.name AS item_name, i.unit_of_measure AS item_uom
        FROM unix_requisitions r
-       JOIN unix_store_inventory i ON i.id = r.inventory_item_id
+       LEFT JOIN unix_store_inventory i ON i.id = r.inventory_item_id
        WHERE r.id = ?`,
       [req.params.id]
     );
@@ -61,19 +61,40 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/requisitions  – kitchen raises a request
+// Normal request: { inventory_item_id, quantity, unit_of_measure, requested_by, purpose, notes }
+// New item request: { item_name, unit, quantity, requested_by, purpose?, notes? }
+//   → inventory_item_id is stored as NULL; notes is prefixed with [NEW ITEM REQUEST].
 router.post('/', async (req, res) => {
-  const { inventory_item_id, quantity, unit_of_measure, requested_by, purpose, notes } = req.body;
-  if (!inventory_item_id || !quantity || !requested_by) {
-    return res.status(400).json({ error: 'inventory_item_id, quantity, and requested_by are required' });
+  const { inventory_item_id, item_name, quantity, unit, unit_of_measure, requested_by, purpose, notes } = req.body;
+
+  if (!quantity || !requested_by) {
+    return res.status(400).json({ error: 'quantity and requested_by are required' });
   }
+
+  // Determine if this is a new-item request
+  const isNewItem = !inventory_item_id && !!item_name;
+  if (!isNewItem && !inventory_item_id) {
+    return res.status(400).json({ error: 'inventory_item_id is required (or provide item_name for a new item request)' });
+  }
+
+  // Build structured notes for new-item requests
+  let resolvedNotes = notes || null;
+  let resolvedUom = unit_of_measure || unit || null;
+  if (isNewItem) {
+    const qtyUnit = unit || unit_of_measure || 'pcs';
+    const extra = notes ? notes.trim() : '';
+    resolvedNotes = `[NEW ITEM REQUEST] Name: ${item_name.trim()} | Qty: ${quantity} ${qtyUnit}${extra ? ` | Notes: ${extra}` : ''}`;
+    resolvedUom = qtyUnit;
+  }
+
   const id = uuidv4();
   try {
     await query(
       `INSERT INTO unix_requisitions
          (id, inventory_item_id, quantity, unit_of_measure, requested_by, purpose, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, inventory_item_id, quantity, unit_of_measure || null,
-       requested_by, purpose || 'Sales', notes || null]
+      [id, isNewItem ? null : inventory_item_id, quantity, resolvedUom,
+       requested_by, purpose || 'Sales', resolvedNotes]
     );
     res.status(201).json({ id });
   } catch (err) {
@@ -108,7 +129,7 @@ router.patch('/:id/issue', async (req, res) => {
       return res.status(409).json({ error: `Cannot issue a requisition with status '${req_row.status}'` });
     }
 
-    // Resolve the actual quantity to deduct (override or full request)
+    // Resolve the actual quantity to record (override or full request)
     const qtyToIssue = issued_quantity != null
       ? Number(issued_quantity)
       : Number(req_row.quantity);
@@ -118,25 +139,29 @@ router.patch('/:id/issue', async (req, res) => {
       return res.status(400).json({ error: 'issued_quantity must be greater than zero' });
     }
 
-    // Check available stock
-    const [[item]] = await conn.execute(
-      'SELECT quantity_in_stock FROM unix_store_inventory WHERE id = ?',
-      [req_row.inventory_item_id]
-    );
-    if (Number(item.quantity_in_stock) < qtyToIssue) {
-      await conn.rollback();
-      return res.status(409).json({
-        error: 'Insufficient stock',
-        available: item.quantity_in_stock,
-        requested: qtyToIssue
-      });
-    }
+    // For new-item requests (inventory_item_id is NULL), skip stock check and deduction.
+    // The storekeeper is simply acknowledging the request and will add the item manually.
+    if (req_row.inventory_item_id !== null) {
+      // Check available stock
+      const [[item]] = await conn.execute(
+        'SELECT quantity_in_stock FROM unix_store_inventory WHERE id = ?',
+        [req_row.inventory_item_id]
+      );
+      if (Number(item.quantity_in_stock) < qtyToIssue) {
+        await conn.rollback();
+        return res.status(409).json({
+          error: 'Insufficient stock',
+          available: item.quantity_in_stock,
+          requested: qtyToIssue
+        });
+      }
 
-    // Deduct stock
-    await conn.execute(
-      'UPDATE unix_store_inventory SET quantity_in_stock = quantity_in_stock - ? WHERE id = ?',
-      [qtyToIssue, req_row.inventory_item_id]
-    );
+      // Deduct stock
+      await conn.execute(
+        'UPDATE unix_store_inventory SET quantity_in_stock = quantity_in_stock - ? WHERE id = ?',
+        [qtyToIssue, req_row.inventory_item_id]
+      );
+    }
 
     // Mark requisition as Issued, saving the actual issued quantity and any notes
     await conn.execute(

@@ -66,6 +66,178 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
     _loadMyRequests();
   }
 
+  Future<void> _showNewItemRequestDialog() async {
+    final nameCtrl    = TextEditingController();
+    final qtyCtrl     = TextEditingController(text: '1');
+    final purposeCtrl = TextEditingController();
+    String unit = 'pcs';
+    const units = ['kg', 'g', 'L', 'ml', 'pcs', 'dozen', 'bag', 'box', 'bunch'];
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          backgroundColor: const Color(0xFF1A2634),
+          title: const Row(children: [
+            Icon(Icons.add_box_rounded, color: AppTheme.pinTeal, size: 22),
+            SizedBox(width: 8),
+            Text('Request New Item',
+                style: TextStyle(color: Colors.white, fontSize: 17)),
+          ]),
+          content: SingleChildScrollView(
+            child: SizedBox(
+              width: 340,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Request an item that is not yet in the inventory.',
+                    style: TextStyle(color: AppTheme.pinMuted, fontSize: 12),
+                  ),
+                  const SizedBox(height: 16),
+                  // Item name
+                  TextField(
+                    controller: nameCtrl,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      filled: true,
+                      fillColor: Color(0xFF0F1923),
+                      labelText: 'Item Name *',
+                      labelStyle: TextStyle(color: Colors.white54),
+                      prefixIcon: Icon(Icons.inventory_2_rounded, color: AppTheme.pinMuted),
+                      enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white24)),
+                      focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: AppTheme.pinTeal, width: 2)),
+                    ),
+                    textCapitalization: TextCapitalization.words,
+                  ),
+                  const SizedBox(height: 12),
+                  // Quantity + Unit row
+                  Row(children: [
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: qtyCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          filled: true,
+                          fillColor: Color(0xFF0F1923),
+                          labelText: 'Quantity *',
+                          labelStyle: TextStyle(color: Colors.white54),
+                          prefixIcon: Icon(Icons.numbers_rounded, color: AppTheme.pinMuted),
+                          enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Colors.white24)),
+                          focusedBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: AppTheme.pinTeal, width: 2)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 2,
+                      child: DropdownButtonFormField<String>(
+                        value: unit,
+                        dropdownColor: const Color(0xFF1A2634),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          filled: true,
+                          fillColor: Color(0xFF0F1923),
+                          labelText: 'Unit',
+                          labelStyle: TextStyle(color: Colors.white54),
+                          enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Colors.white24)),
+                          focusedBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: AppTheme.pinTeal, width: 2)),
+                        ),
+                        items: units
+                            .map((u) => DropdownMenuItem(value: u, child: Text(u)))
+                            .toList(),
+                        onChanged: (v) => setDlg(() => unit = v!),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 12),
+                  // Purpose / Notes
+                  TextField(
+                    controller: purposeCtrl,
+                    style: const TextStyle(color: Colors.white),
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      filled: true,
+                      fillColor: Color(0xFF0F1923),
+                      labelText: 'Purpose / Notes (optional)',
+                      labelStyle: TextStyle(color: Colors.white54),
+                      hintText: 'e.g. urgent, for weekend event',
+                      hintStyle: TextStyle(color: Colors.white24),
+                      prefixIcon: Icon(Icons.notes_rounded, color: AppTheme.pinMuted),
+                      enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white24)),
+                      focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: AppTheme.pinTeal, width: 2)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel', style: TextStyle(color: Colors.white54))),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.pinTeal),
+              icon: const Icon(Icons.send_rounded, size: 16, color: Colors.white),
+              label: const Text('Send Request',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final name = nameCtrl.text.trim();
+    final qty  = double.tryParse(qtyCtrl.text.trim());
+    if (name.isEmpty || qty == null || qty <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Please enter a valid item name and quantity.'),
+        backgroundColor: Colors.orange,
+      ));
+      return;
+    }
+
+    try {
+      await ApiService.instance.submitNewItemRequest(
+        requestedBy: widget.staff.name,
+        itemName:    name,
+        unit:        unit,
+        qty:         qty,
+        purpose:     'Sales',
+        notes:       purposeCtrl.text.trim().isEmpty ? null : purposeCtrl.text.trim(),
+      );
+      HapticFeedback.heavyImpact();
+      if (!mounted) return;
+      _loadMyRequests();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('📋  New item request sent for "$name"!'),
+        backgroundColor: AppTheme.paidGreen,
+        duration: const Duration(seconds: 3),
+      ));
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e.message),
+        backgroundColor: Colors.red,
+      ));
+    }
+  }
+
   Future<void> _loadMyRequests() async {
     setState(() => _loadingRequests = true);
     try {
@@ -343,6 +515,7 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
                               onSubmit:           _submit,
                               onRefreshReqs:      _loadMyRequests,
                               onSearch:           (v) => setState(() => _search = v),
+                              onNewItemRequest:   _showNewItemRequestDialog,
                             ),
                 ),
               ],
@@ -474,6 +647,7 @@ class _Body extends StatelessWidget {
   final VoidCallback onSubmit;
   final VoidCallback onRefreshReqs;
   final void Function(String) onSearch;
+  final VoidCallback onNewItemRequest;
 
   const _Body({
     required this.items,
@@ -497,6 +671,7 @@ class _Body extends StatelessWidget {
     required this.onSubmit,
     required this.onRefreshReqs,
     required this.onSearch,
+    required this.onNewItemRequest,
   });
 
   @override
@@ -519,6 +694,7 @@ class _Body extends StatelessWidget {
       onRemoveFromBasket: onRemoveFromBasket,
       onSubmit:           onSubmit,
       onSearch:           onSearch,
+      onNewItemRequest:   onNewItemRequest,
     );
 
     if (isMobile) {
@@ -564,6 +740,7 @@ class _RequestForm extends StatelessWidget {
   final void Function(int) onRemoveFromBasket;
   final VoidCallback onSubmit;
   final void Function(String) onSearch;
+  final VoidCallback onNewItemRequest;
 
   const _RequestForm({
     required this.items,
@@ -583,6 +760,7 @@ class _RequestForm extends StatelessWidget {
     required this.onRemoveFromBasket,
     required this.onSubmit,
     required this.onSearch,
+    required this.onNewItemRequest,
   });
 
   @override
@@ -625,6 +803,23 @@ class _RequestForm extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide.none,
               ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          // ── Request New Item (not in stock) ───────────────────
+          OutlinedButton.icon(
+            onPressed: onNewItemRequest,
+            icon: const Icon(Icons.add_box_rounded,
+                size: 16, color: AppTheme.pinMuted),
+            label: const Text(
+              'Request New Item (Not in Stock)',
+              style: TextStyle(color: AppTheme.pinMuted, fontSize: 13),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: AppTheme.pinMuted, width: 1),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
           ),
           const SizedBox(height: 12),

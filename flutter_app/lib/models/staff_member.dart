@@ -56,9 +56,9 @@ const kAllCapabilities = <(String, String)>[
   ('can_approve_requisitions',    'Approve Requisitions'),
   ('can_manage_inventory',        'Manage Inventory'),
   ('can_delete_inventory',        'Delete Inventory Item'),
-  ('can_draft_po',                'Draft Purchase Orders'),
+  ('can_draft_po',                'Manage Purchase Orders'),
+  ('can_manage_cycle_count',      'Manage Cycle Counts'),
   ('can_approve_payrun',          'Approve Pay Runs'),
-  ('can_log_waste',               'Log Waste / Spoilage'),
   ('can_manage_staff',            'Manage Staff'),
   ('can_view_variance',           'View Variance Dashboard'),
   ('can_manage_settings',         'Manage System Settings'),
@@ -70,20 +70,19 @@ const kAllCapabilities = <(String, String)>[
 
 /// Default capabilities seeded per role when a new staff member is created.
 List<String> defaultCapabilities(String role) => switch (role) {
-      'kitchen'   => ['can_log_waste'],
+      'kitchen'   => [],
       'store'     => [
                        'can_approve_requisitions',
                        'can_manage_inventory',
                        'can_draft_po',
-                       'can_view_variance',
                      ],
       'manager'   => [
                        'can_approve_requisitions',
                        'can_manage_inventory',
                        'can_delete_inventory',
                        'can_draft_po',
+                       'can_manage_cycle_count',
                        'can_approve_payrun',
-                       'can_log_waste',
                        'can_manage_staff',
                        'can_view_variance',
                        'can_manage_settings',

@@ -83,8 +83,25 @@ class _RequisitionApprovalScreenState
 
   int get _pendingCount => _all.where((r) => r.isPending).length;
 
-  // Phase 8: Issue dialog — lets storekeeper adjust qty and add a note.
+  // Phase 8 / M14: Issue dialog — branches on requisition type.
   Future<void> _issue(Requisition req) async {
+    // ── New Item Request: custom add-to-inventory flow ──────────
+    if (req.isNewItemRequest) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (_) => _AddNewItemFromRequestDialog(
+          req:       req,
+          staffName: widget.staff.name,
+        ),
+      );
+      if (ok == true) {
+        _showSuccess('Item added to inventory and request approved.');
+        _loadRequisitions();
+      }
+      return;
+    }
+
+    // ── Standard requisition: quantity-adjust issue dialog ──────
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (_) => _IssueDialog(req: req),
@@ -367,14 +384,16 @@ class _RequisitionCard extends StatelessWidget {
               width: 52,
               height: 52,
               decoration: BoxDecoration(
-                color: req.isSales
-                    ? AppTheme.pinTeal.withOpacity(0.12)
-                    : AppTheme.secondary.withOpacity(0.12),
+                color: req.isNewItemRequest
+                    ? const Color(0xFF00796B).withOpacity(0.12)
+                    : req.isSales
+                        ? AppTheme.pinTeal.withOpacity(0.12)
+                        : AppTheme.secondary.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Center(
                 child: Text(
-                  req.isSales ? '📦' : '🍽️',
+                  req.isNewItemRequest ? '🆕' : req.isSales ? '📦' : '🍽️',
                   style: const TextStyle(fontSize: 26),
                 ),
               ),
@@ -387,26 +406,51 @@ class _RequisitionCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Item + Qty
-                  RichText(
-                    text: TextSpan(
-                      style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black87),
-                      children: [
-                        TextSpan(text: req.itemName),
-                        TextSpan(
-                          text:
-                              '  ×  ${req.quantity.toStringAsFixed(req.quantity % 1 == 0 ? 0 : 1)} '
-                              '${req.unitOfMeasure ?? req.itemUom ?? ''}',
-                          style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.grey.shade600),
+                  Row(children: [
+                    if (req.isNewItemRequest) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF00796B),
+                          borderRadius: BorderRadius.circular(4),
                         ),
-                      ],
+                        child: const Text('NEW ITEM',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.5)),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    Expanded(
+                      child: RichText(
+                        text: TextSpan(
+                          style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black87),
+                          children: [
+                            TextSpan(
+                              text: req.isNewItemRequest
+                                  ? (req.newItemName ?? 'New Item')
+                                  : req.itemName,
+                            ),
+                            TextSpan(
+                              text:
+                                  '  ×  ${req.quantity.toStringAsFixed(req.quantity % 1 == 0 ? 0 : 1)} '
+                                  '${req.unitOfMeasure ?? req.itemUom ?? ''}',
+                              style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.grey.shade600),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
+                  ]),
                   const SizedBox(height: 6),
                   // Meta row
                   Wrap(
@@ -497,18 +541,24 @@ class _RequisitionCard extends StatelessWidget {
                 const SizedBox(height: 12),
                 if (isPending) ...[
                   SizedBox(
-                    width: 120,
+                    width: 140,
                     height: 44,
                     child: ElevatedButton.icon(
                       onPressed: onIssue,
                       style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.paidGreen,
+                          backgroundColor: req.isNewItemRequest
+                              ? const Color(0xFF00796B)
+                              : AppTheme.paidGreen,
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10))),
-                      icon: const Icon(Icons.check_rounded,
+                      icon: Icon(
+                          req.isNewItemRequest
+                              ? Icons.add_circle_rounded
+                              : Icons.check_rounded,
                           size: 18, color: Colors.white),
-                      label: const Text('Issue',
-                          style: TextStyle(
+                      label: Text(
+                          req.isNewItemRequest ? 'Approve' : 'Issue',
+                          style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w700)),
                     ),
@@ -781,6 +831,303 @@ class _IssueDialogState extends State<_IssueDialog> {
           },
           style: ElevatedButton.styleFrom(backgroundColor: AppTheme.paidGreen),
           child: const Text('Confirm Issue'),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M14: Add New Item From Request Dialog
+// Shown when a storekeeper approves a kitchen "new item request".
+// Combines a mini "Add Inventory Item" form with the issue-requisition call.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _kCategories = [
+  'Meat', 'Vegetables', 'Dairy', 'Dry Goods',
+  'Beverages', 'Cleaning', 'Packaging', 'Other',
+];
+
+const _kUomOptions = [
+  'kg', 'g', 'L', 'ml', 'pcs', 'dozen', 'bag', 'box', 'litre', 'bunch',
+];
+
+class _AddNewItemFromRequestDialog extends StatefulWidget {
+  final Requisition req;
+  final String staffName;
+
+  const _AddNewItemFromRequestDialog({
+    required this.req,
+    required this.staffName,
+  });
+
+  @override
+  State<_AddNewItemFromRequestDialog> createState() =>
+      _AddNewItemFromRequestDialogState();
+}
+
+class _AddNewItemFromRequestDialogState
+    extends State<_AddNewItemFromRequestDialog> {
+  final _formKey       = GlobalKey<FormState>();
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _reorderCtrl;
+  late final TextEditingController _targetQtyCtrl;
+  String? _category;
+  late String _uom;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl      = TextEditingController(
+        text: widget.req.newItemName ?? '');
+    _reorderCtrl   = TextEditingController();
+    _targetQtyCtrl = TextEditingController();
+
+    // Pre-fill UOM from the requisition; fall back to 'pcs' if not in the list.
+    final rawUom = widget.req.unitOfMeasure ?? widget.req.itemUom ?? 'pcs';
+    _uom = _kUomOptions.contains(rawUom) ? rawUom : 'pcs';
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _reorderCtrl.dispose();
+    _targetQtyCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_category == null) {
+      setState(() => _error = 'Please select a category.');
+      return;
+    }
+
+    setState(() { _saving = true; _error = null; });
+
+    try {
+      // Step 1: Create the inventory item (stock starts at 0).
+      // Target procure qty has no dedicated DB column — stored in notes.
+      final targetQty = double.tryParse(_targetQtyCtrl.text.trim());
+      final notesStr  = targetQty != null
+          ? 'Target order qty: ${targetQty.toStringAsFixed(targetQty % 1 == 0 ? 0 : 1)} $_uom'
+          : null;
+
+      await ApiService.instance.createInventoryItem({
+        'name':              _nameCtrl.text.trim(),
+        'category':          _category,
+        'unit_of_measure':   _uom,
+        'quantity_in_stock': 0,
+        'reorder_level':     double.parse(_reorderCtrl.text.trim()),
+        if (notesStr != null) 'notes': notesStr,
+      });
+
+      // Step 2: Mark the requisition as issued (backend skips stock deduction
+      // because inventory_item_id is NULL on new-item requests).
+      await ApiService.instance.issueRequisition(
+        widget.req.id,
+        widget.staffName,
+        issueNotes: 'Added to inventory as new item',
+      );
+
+      if (!mounted) return;
+      Navigator.of(context).pop(true); // signal success to parent
+    } on ApiException catch (e) {
+      setState(() { _error = e.message; _saving = false; });
+    } catch (e) {
+      setState(() { _error = e.toString(); _saving = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final req = widget.req;
+
+    return AlertDialog(
+      title: Row(children: [
+        const Icon(Icons.add_circle_rounded,
+            color: Color(0xFF00796B), size: 22),
+        const SizedBox(width: 8),
+        const Expanded(
+          child: Text('Add to Inventory & Approve',
+              style: TextStyle(fontSize: 15)),
+        ),
+      ]),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400),
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Context banner
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00796B).withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: const Color(0xFF00796B).withOpacity(0.3)),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.info_outline_rounded,
+                        size: 14, color: Color(0xFF00796B)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Requested by ${req.requestedBy}  ·  '
+                        '${req.quantity.toStringAsFixed(req.quantity % 1 == 0 ? 0 : 1)} '
+                        '${req.unitOfMeasure ?? req.itemUom ?? ''}',
+                        style: const TextStyle(
+                            fontSize: 12, color: Color(0xFF00796B)),
+                      ),
+                    ),
+                  ]),
+                ),
+                const SizedBox(height: 16),
+
+                // Item Name
+                TextFormField(
+                  controller: _nameCtrl,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    labelText: 'Item Name *',
+                    prefixIcon: Icon(Icons.inventory_2_rounded),
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (v) => (v == null || v.trim().isEmpty)
+                      ? 'Item name is required'
+                      : null,
+                ),
+                const SizedBox(height: 12),
+
+                // Category
+                DropdownButtonFormField<String>(
+                  value: _category,
+                  decoration: const InputDecoration(
+                    labelText: 'Category *',
+                    prefixIcon: Icon(Icons.label_rounded),
+                    border: OutlineInputBorder(),
+                  ),
+                  items: _kCategories
+                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                      .toList(),
+                  onChanged: (v) => setState(() {
+                    _category = v;
+                    _error = null;
+                  }),
+                  validator: (v) =>
+                      v == null ? 'Category is required' : null,
+                ),
+                const SizedBox(height: 12),
+
+                // Unit of Measure
+                DropdownButtonFormField<String>(
+                  value: _uom,
+                  decoration: const InputDecoration(
+                    labelText: 'Unit of Measure *',
+                    prefixIcon: Icon(Icons.straighten_rounded),
+                    border: OutlineInputBorder(),
+                  ),
+                  items: _kUomOptions
+                      .map((u) => DropdownMenuItem(value: u, child: Text(u)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _uom = v!),
+                ),
+                const SizedBox(height: 12),
+
+                // Reorder Level
+                TextFormField(
+                  controller: _reorderCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Min Stock Level (Reorder Level) *',
+                    prefixIcon: Icon(Icons.warning_amber_rounded),
+                    border: OutlineInputBorder(),
+                    helperText:
+                        'Set this so the system triggers a purchase in the next procurement run.',
+                    helperMaxLines: 2,
+                  ),
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'Required';
+                    if (double.tryParse(v.trim()) == null) return 'Enter a number';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+
+                // Reorder Quantity
+                TextFormField(
+                  controller: _targetQtyCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Target Procure Qty (Reorder Quantity) *',
+                    prefixIcon: Icon(Icons.add_shopping_cart_rounded),
+                    border: OutlineInputBorder(),
+                    helperText:
+                        'How much to order when stock drops below the min level.',
+                  ),
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'Required';
+                    if (double.tryParse(v.trim()) == null) return 'Enter a number';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 8),
+
+                // Current stock note (locked to 0)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.scaffold,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(children: [
+                    Icon(Icons.lock_outline_rounded,
+                        size: 14, color: Colors.grey.shade500),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Current Stock: 0  (item not yet received)',
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.grey.shade600),
+                    ),
+                  ]),
+                ),
+
+                if (_error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(_error!,
+                      style: const TextStyle(
+                          color: AppTheme.debtRed, fontSize: 13)),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+            child: const Text('Cancel')),
+        FilledButton.icon(
+          onPressed: _saving ? null : _submit,
+          style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF00796B)),
+          icon: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.add_circle_rounded, size: 16),
+          label: const Text('Add to Inventory & Approve'),
         ),
       ],
     );

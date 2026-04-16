@@ -44,6 +44,8 @@ class LedgerEntry {
   bool get isSupplierPayment => transactionType == 'SUPPLIER_PAYMENT';
   bool get isCashIn          => transactionType == 'CASH_IN';
   bool get isPayment         => transactionType == 'PAYMENT';
+  bool get isOtherExpense    => transactionType == 'OTHER_EXPENSE';
   // CASH_IN is a credit (reduces outstanding balance), same as PAYMENT.
-  bool get isDebit => isPurchase || isSupplierPayment;
+  // OTHER_EXPENSE is a debit (cash spent from float, no linked supplier record).
+  bool get isDebit => isPurchase || isSupplierPayment || isOtherExpense;
 }

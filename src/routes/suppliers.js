@@ -6,14 +6,14 @@ const router = express.Router();
 
 // GET /api/suppliers  – list all suppliers with their current balance
 // For external suppliers: PURCHASE increases debt, PAYMENT decreases it.
-// For internal suppliers (managers): PURCHASE + SUPPLIER_PAYMENT are both debits
+// For internal suppliers (managers): PURCHASE + SUPPLIER_PAYMENT + OTHER_EXPENSE are debits
 //   (cash spent from the float), PAYMENT + CASH_IN are credits (float replenishment).
 router.get('/', async (req, res) => {
   try {
     const rows = await query(`
       SELECT
         s.*,
-        COALESCE(SUM(CASE WHEN l.transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT') THEN l.amount ELSE 0 END), 0)
+        COALESCE(SUM(CASE WHEN l.transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT','OTHER_EXPENSE') THEN l.amount ELSE 0 END), 0)
           - COALESCE(SUM(CASE WHEN l.transaction_type IN ('PAYMENT','CASH_IN') THEN l.amount ELSE 0 END), 0)
           AS balance_due
       FROM unix_suppliers s
@@ -100,8 +100,8 @@ router.get('/:id/ledger', async (req, res) => {
     );
     let balance = 0;
     const withBalance = entries.map(e => {
-      // PURCHASE and SUPPLIER_PAYMENT both increase the account's spend (debit)
-      const isDebit = e.transaction_type === 'PURCHASE' || e.transaction_type === 'SUPPLIER_PAYMENT';
+      // PURCHASE, SUPPLIER_PAYMENT, and OTHER_EXPENSE all increase the account's spend (debit)
+      const isDebit = e.transaction_type === 'PURCHASE' || e.transaction_type === 'SUPPLIER_PAYMENT' || e.transaction_type === 'OTHER_EXPENSE';
       balance += isDebit ? Number(e.amount) : -Number(e.amount);
       return { ...e, running_balance: Number(balance.toFixed(2)) };
     });
@@ -111,16 +111,17 @@ router.get('/:id/ledger', async (req, res) => {
   }
 });
 
-// POST /api/suppliers/:id/ledger  – manually record a PURCHASE, PAYMENT, or CASH_IN
+// POST /api/suppliers/:id/ledger  – manually record a PURCHASE, PAYMENT, CASH_IN, or OTHER_EXPENSE
 // SUPPLIER_PAYMENT is created automatically by the pay run disburse route.
 // CASH_IN is used on internal (manager) accounts to record bank withdrawals / float top-ups.
+// OTHER_EXPENSE is a catch-all debit for miscellaneous float spending not linked to a supplier.
 router.post('/:id/ledger', async (req, res) => {
   const { transaction_type, amount, description, reference_doc, transaction_date } = req.body;
   if (!transaction_type || !amount || !transaction_date) {
     return res.status(400).json({ error: 'transaction_type, amount, and transaction_date are required' });
   }
-  if (!['PURCHASE', 'PAYMENT', 'CASH_IN'].includes(transaction_type)) {
-    return res.status(400).json({ error: 'transaction_type must be PURCHASE, PAYMENT, or CASH_IN' });
+  if (!['PURCHASE', 'PAYMENT', 'CASH_IN', 'OTHER_EXPENSE'].includes(transaction_type)) {
+    return res.status(400).json({ error: 'transaction_type must be PURCHASE, PAYMENT, CASH_IN, or OTHER_EXPENSE' });
   }
   const id = uuidv4();
   try {
@@ -157,7 +158,7 @@ router.get('/:id/statement', async (req, res) => {
     // Opening balance: all transactions BEFORE the period
     const openRows = await query(
       `SELECT
-         COALESCE(SUM(CASE WHEN transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT') THEN amount ELSE 0 END), 0)
+         COALESCE(SUM(CASE WHEN transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT','OTHER_EXPENSE') THEN amount ELSE 0 END), 0)
            - COALESCE(SUM(CASE WHEN transaction_type IN ('PAYMENT','CASH_IN') THEN amount ELSE 0 END), 0)
            AS opening_balance
        FROM unix_supplier_ledger
@@ -177,15 +178,16 @@ router.get('/:id/statement', async (req, res) => {
       [req.params.id, periodStartStr, todayStr]
     );
 
-    let purchases = 0, supplierPayments = 0, payments = 0, cashIns = 0;
+    let purchases = 0, supplierPayments = 0, otherExpenses = 0, payments = 0, cashIns = 0;
     for (const r of periodRows) {
       if (r.transaction_type === 'PURCHASE')         purchases        += Number(r.amount);
       if (r.transaction_type === 'SUPPLIER_PAYMENT') supplierPayments += Number(r.amount);
+      if (r.transaction_type === 'OTHER_EXPENSE')    otherExpenses    += Number(r.amount);
       if (r.transaction_type === 'PAYMENT')          payments         += Number(r.amount);
       if (r.transaction_type === 'CASH_IN')          cashIns          += Number(r.amount);
     }
 
-    const totalDebits   = purchases + supplierPayments;
+    const totalDebits   = purchases + supplierPayments + otherExpenses;
     const totalCredits  = payments + cashIns;
     const closingBalance = openingBalance + totalDebits - totalCredits;
 
@@ -202,6 +204,7 @@ router.get('/:id/statement', async (req, res) => {
       opening_balance:          Number(openingBalance.toFixed(2)),
       period_purchases:         Number(purchases.toFixed(2)),
       period_supplier_payments: Number(supplierPayments.toFixed(2)),
+      period_other_expenses:    Number(otherExpenses.toFixed(2)),
       period_payments:          Number(payments.toFixed(2)),
       period_cash_ins:          Number(cashIns.toFixed(2)),
       closing_balance:          Number(closingBalance.toFixed(2)),
@@ -236,7 +239,7 @@ router.get('/:id/statement/whatsapp', async (req, res) => {
 
     const openRows = await query(
       `SELECT
-         COALESCE(SUM(CASE WHEN transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT') THEN amount ELSE 0 END), 0)
+         COALESCE(SUM(CASE WHEN transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT','OTHER_EXPENSE') THEN amount ELSE 0 END), 0)
            - COALESCE(SUM(CASE WHEN transaction_type IN ('PAYMENT','CASH_IN') THEN amount ELSE 0 END), 0)
            AS opening_balance
        FROM unix_supplier_ledger
@@ -251,14 +254,15 @@ router.get('/:id/statement/whatsapp', async (req, res) => {
       [req.params.id, periodStartStr, todayStr]
     );
 
-    let purchases = 0, supplierPayments = 0, payments = 0, cashIns = 0;
+    let purchases = 0, supplierPayments = 0, otherExpenses = 0, payments = 0, cashIns = 0;
     for (const r of periodRows) {
       if (r.transaction_type === 'PURCHASE')         purchases        += Number(r.amount);
       if (r.transaction_type === 'SUPPLIER_PAYMENT') supplierPayments += Number(r.amount);
+      if (r.transaction_type === 'OTHER_EXPENSE')    otherExpenses    += Number(r.amount);
       if (r.transaction_type === 'PAYMENT')          payments         += Number(r.amount);
       if (r.transaction_type === 'CASH_IN')          cashIns          += Number(r.amount);
     }
-    const closingBalance = openingBalance + purchases + supplierPayments - payments - cashIns;
+    const closingBalance = openingBalance + purchases + supplierPayments + otherExpenses - payments - cashIns;
 
     const settingsRows = await query(
       `SELECT setting_key, setting_value FROM unix_settings WHERE setting_key IN ('business_name','slogan')`
@@ -289,6 +293,7 @@ router.get('/:id/statement/whatsapp', async (req, res) => {
         `💰 Cash Received from Bank: ${fmt(cashIns)}`,
         `🧾 Used to Pay Suppliers:   ${fmt(supplierPayments)}`,
         `🛒 Ad-Hoc Expenses:         ${fmt(purchases)}`,
+        `📋 Other Expenses:          ${fmt(otherExpenses)}`,
         `↩️ Payments Reimbursed:     ${fmt(payments)}`,
         `───────────────────────`,
         `*Running Float Balance:  ${fmt(closingBalance)}*`,
@@ -348,7 +353,7 @@ router.get('/alerts/upcoming-debt', async (req, res) => {
     const rows = await query(`
       SELECT
         s.id, s.name, s.phone, s.payment_day, s.lead_time_days,
-        COALESCE(SUM(CASE WHEN l.transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT') THEN l.amount ELSE 0 END), 0)
+        COALESCE(SUM(CASE WHEN l.transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT','OTHER_EXPENSE') THEN l.amount ELSE 0 END), 0)
           - COALESCE(SUM(CASE WHEN l.transaction_type IN ('PAYMENT','CASH_IN') THEN l.amount ELSE 0 END), 0)
           AS balance_due
       FROM unix_suppliers s

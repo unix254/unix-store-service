@@ -249,6 +249,27 @@ class ApiService {
     return data['id'] as String;
   }
 
+  /// Phase 11: Submit a "new item request" — inventory_item_id will be NULL on the server.
+  /// The server stores a structured note: [NEW ITEM REQUEST] Name: ... | Qty: ... | Notes: ...
+  Future<String> submitNewItemRequest({
+    required String requestedBy,
+    required String itemName,
+    required String unit,
+    required double qty,
+    required String purpose,
+    String? notes,
+  }) async {
+    final data = await _post('/api/requisitions', {
+      'item_name':    itemName,
+      'unit':         unit,
+      'quantity':     qty,
+      'requested_by': requestedBy,
+      'purpose':      purpose,
+      if (notes != null && notes.isNotEmpty) 'notes': notes,
+    });
+    return data['id'] as String;
+  }
+
   /// Phase 8: [issuedQuantity] lets the storekeeper issue a partial/adjusted amount.
   /// [issueNotes] explains the adjustment to the requester.
   Future<void> issueRequisition(
