@@ -196,7 +196,10 @@ class ApiService {
   /// Adjust stock level: positive delta = receive delivery, negative = correction.
   /// For deliveries, supply [supplierId] + [totalCost] to auto-post a PURCHASE
   /// entry on the supplier ledger (zero-friction debt linking).
-  Future<void> adjustStock(
+  ///
+  /// Returns the raw response map — callers should inspect [result['priceWarning']]
+  /// which is non-null when a delivery caused a cost increase affecting POS items.
+  Future<Map<String, dynamic>?> adjustStock(
     String id,
     double delta, {
     String? reason,
@@ -205,7 +208,7 @@ class ApiService {
     String? supplierId,
     double? totalCost,
   }) async {
-    await _patch('/api/inventory/$id/adjust', {
+    final result = await _patch('/api/inventory/$id/adjust', {
       'delta': delta,
       if (reason != null && reason.isNotEmpty) 'reason': reason,
       if (changedBy != null) 'changed_by': changedBy,
@@ -213,6 +216,7 @@ class ApiService {
       if (supplierId != null) 'supplier_id': supplierId,
       if (totalCost != null && totalCost > 0) 'total_cost': totalCost,
     });
+    return result as Map<String, dynamic>?;
   }
 
   // ── Requisitions ────────────────────────────────────────────
@@ -332,9 +336,17 @@ class ApiService {
     });
   }
 
-  Future<List<Map<String, dynamic>>> getInflationSummary() async {
-    final data = await _get('/api/inventory/inflation-summary');
+  Future<List<Map<String, dynamic>>> getInflationSummary({int days = 30}) async {
+    final data = await _get('/api/inventory/inflation-summary?days=$days');
     return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> sendPriceImpact({String? phone, int days = 30}) async {
+    final data = await _post('/api/inventory/send-price-impact', {
+      if (phone != null && phone.isNotEmpty) 'phone': phone,
+      'days': days,
+    });
+    return data as Map<String, dynamic>;
   }
 
   Future<List<Map<String, dynamic>>> getCostHistory(String itemId) async {

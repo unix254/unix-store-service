@@ -116,29 +116,48 @@ router.get('/cost-history/:id', async (req, res) => {
   }
 });
 
-// GET /api/inventory/inflation-summary  – recent cost changes across all items (for heatmap)
-// Returns items whose cost changed in the last 30 days, with weekly usage for KES impact calc.
+// GET /api/inventory/inflation-summary
+// Returns cost changes in the last 30 days, enriched with yield config + POS product data.
+// Used by the dedicated Price Impact Advisory screen in the BI Hub.
+// Query param: ?days=30 (optional, defaults to 30)
 router.get('/inflation-summary', async (req, res) => {
+  const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 365);
   try {
     const rows = await query(`
       SELECT
-        i.id,
-        i.name,
+        i.id                                                           AS inventory_id,
+        i.name                                                         AS inventory_name,
         i.unit_of_measure,
-        i.cost_per_unit AS current_cost,
+        i.cost_per_unit                                                AS current_cost,
         ch.old_cost,
         ch.new_cost,
         ch.changed_at,
-        ROUND(COALESCE(weekly.qty, 0), 3) AS weekly_usage,
-        ROUND((ch.new_cost - COALESCE(ch.old_cost, ch.new_cost)) * COALESCE(weekly.qty, 0), 2) AS weekly_impact_kes
+        ROUND(COALESCE(weekly.qty, 0), 3)                             AS weekly_usage,
+        ROUND((ch.new_cost - COALESCE(ch.old_cost, ch.new_cost))
+              * COALESCE(weekly.qty, 0), 2)                           AS weekly_impact_kes,
+        -- Yield config linkage
+        yc.id                                                          AS yield_config_id,
+        yc.portions_per_unit,
+        -- POS product details (from uniCenta read-only tables)
+        p.id                                                           AS pos_product_id,
+        p.name                                                         AS pos_product_name,
+        p.pricesell                                                    AS pos_sell_price,
+        -- Cost rise per portion for this ingredient-product pair
+        CASE
+          WHEN yc.portions_per_unit > 0
+          THEN ROUND((ch.new_cost - COALESCE(ch.old_cost, ch.new_cost))
+                     / yc.portions_per_unit, 4)
+          ELSE NULL
+        END                                                            AS cost_rise_per_portion
       FROM unix_cost_history ch
       JOIN unix_store_inventory i ON i.id = ch.inventory_item_id
       JOIN (
         SELECT inventory_item_id, changed_at,
                ROW_NUMBER() OVER (PARTITION BY inventory_item_id ORDER BY changed_at DESC) AS rn
         FROM unix_cost_history
-        WHERE changed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-      ) latest ON latest.inventory_item_id = ch.inventory_item_id AND latest.changed_at = ch.changed_at
+        WHERE changed_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+      ) latest ON latest.inventory_item_id = ch.inventory_item_id
+              AND latest.changed_at = ch.changed_at
       LEFT JOIN (
         SELECT inventory_item_id, ROUND(SUM(quantity) / 4, 3) AS qty
         FROM unix_requisitions
@@ -146,10 +165,145 @@ router.get('/inflation-summary', async (req, res) => {
           AND requested_at >= DATE_SUB(CURDATE(), INTERVAL 28 DAY)
         GROUP BY inventory_item_id
       ) weekly ON weekly.inventory_item_id = i.id
+      -- Join yield configs so we know which POS products use this ingredient
+      LEFT JOIN unix_yield_config yc ON yc.inventory_item_id = i.id
+                                     AND yc.portions_per_unit > 0
+      -- Join POS products table (read-only uniCenta table)
+      LEFT JOIN products p ON p.id = yc.unicenta_product_id
       WHERE latest.rn = 1
-      ORDER BY ABS(weekly_impact_kes) DESC
-    `);
-    res.json(rows);
+      ORDER BY ABS(weekly_impact_kes) DESC, i.name ASC
+    `, [days]);
+
+    // Group by inventory item so each item appears once with an array of impacted products
+    const grouped = {};
+    for (const row of rows) {
+      const key = row.inventory_id;
+      if (!grouped[key]) {
+        grouped[key] = {
+          inventory_id:    row.inventory_id,
+          name:            row.inventory_name,
+          unit_of_measure: row.unit_of_measure,
+          current_cost:    row.current_cost,
+          old_cost:        row.old_cost,
+          new_cost:        row.new_cost,
+          changed_at:      row.changed_at,
+          weekly_usage:    row.weekly_usage,
+          weekly_impact_kes: row.weekly_impact_kes,
+          // Legacy fields kept for backwards compat (heatmap chip format)
+          id:              row.inventory_id,
+          impacted_products: [],
+        };
+      }
+      if (row.pos_product_id && row.pos_product_name) {
+        grouped[key].impacted_products.push({
+          pos_product_id:      row.pos_product_id,
+          pos_product_name:    row.pos_product_name,
+          pos_sell_price:      row.pos_sell_price,
+          portions_per_unit:   row.portions_per_unit,
+          cost_rise_per_portion: row.cost_rise_per_portion,
+        });
+      }
+    }
+
+    res.json(Object.values(grouped));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/inventory/send-price-impact
+// Formats the price-impact report as a WhatsApp-ready text message and returns
+// a deep-link URL (opens WhatsApp with the message pre-filled).
+// Body: { phone?: string, days?: number }
+router.post('/send-price-impact', async (req, res) => {
+  const days = Math.min(Math.max(parseInt(req.body.days) || 30, 1), 365);
+  const phone = req.body.phone ? String(req.body.phone).replace(/\D/g, '') : null;
+
+  try {
+    const rows = await query(`
+      SELECT
+        i.name                                                         AS inventory_name,
+        i.unit_of_measure,
+        ch.old_cost,
+        ch.new_cost,
+        ROUND(COALESCE(weekly.qty, 0), 3)                             AS weekly_usage,
+        ROUND((ch.new_cost - COALESCE(ch.old_cost, ch.new_cost))
+              * COALESCE(weekly.qty, 0), 2)                           AS weekly_impact_kes,
+        p.name                                                         AS pos_product_name,
+        p.pricesell                                                    AS pos_sell_price,
+        CASE
+          WHEN yc.portions_per_unit > 0
+          THEN ROUND((ch.new_cost - COALESCE(ch.old_cost, ch.new_cost))
+                     / yc.portions_per_unit, 2)
+          ELSE NULL
+        END                                                            AS cost_rise_per_portion
+      FROM unix_cost_history ch
+      JOIN unix_store_inventory i ON i.id = ch.inventory_item_id
+      JOIN (
+        SELECT inventory_item_id, changed_at,
+               ROW_NUMBER() OVER (PARTITION BY inventory_item_id ORDER BY changed_at DESC) AS rn
+        FROM unix_cost_history
+        WHERE changed_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+      ) latest ON latest.inventory_item_id = ch.inventory_item_id
+              AND latest.changed_at = ch.changed_at
+      LEFT JOIN (
+        SELECT inventory_item_id, ROUND(SUM(quantity) / 4, 3) AS qty
+        FROM unix_requisitions
+        WHERE status = 'Issued'
+          AND requested_at >= DATE_SUB(CURDATE(), INTERVAL 28 DAY)
+        GROUP BY inventory_item_id
+      ) weekly ON weekly.inventory_item_id = i.id
+      LEFT JOIN unix_yield_config yc ON yc.inventory_item_id = i.id AND yc.portions_per_unit > 0
+      LEFT JOIN products p ON p.id = yc.unicenta_product_id
+      WHERE latest.rn = 1
+      ORDER BY ABS(weekly_impact_kes) DESC, i.name ASC
+    `, [days]);
+
+    if (!rows.length) {
+      return res.json({ ok: true, message: null, whatsapp_url: null,
+        info: 'No cost changes found in the last ' + days + ' days.' });
+    }
+
+    // Build message
+    const today = new Date().toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' });
+    const lines = [];
+    lines.push(`📊 *YUNIX STORE — Price Impact Report*`);
+    lines.push(`_Last ${days} days  •  Generated ${today}_`);
+    lines.push('');
+
+    // Group by ingredient
+    const seen = {};
+    for (const row of rows) {
+      const key = row.inventory_name;
+      if (!seen[key]) {
+        const pctChange = row.old_cost > 0
+          ? Math.round(((row.new_cost - row.old_cost) / row.old_cost) * 100)
+          : 0;
+        const arrow = row.new_cost > row.old_cost ? '🔺' : '🔻';
+        lines.push(`${arrow} *${row.inventory_name}*`);
+        lines.push(`   KES ${Number(row.old_cost).toFixed(0)} → *KES ${Number(row.new_cost).toFixed(0)}* (${pctChange > 0 ? '+' : ''}${pctChange}%)`);
+        if (Number(row.weekly_impact_kes) !== 0) {
+          lines.push(`   Weekly impact: *KES ${Number(row.weekly_impact_kes).toFixed(0)}*`);
+        }
+        seen[key] = true;
+      }
+      if (row.pos_product_name && row.cost_rise_per_portion != null) {
+        lines.push(`   › ${row.pos_product_name}: +KES ${Number(row.cost_rise_per_portion).toFixed(2)}/portion  _(sells @ KES ${Number(row.pos_sell_price).toFixed(0)})_`);
+      }
+      lines.push('');
+    }
+
+    lines.push('_Please review selling prices to maintain target margins._');
+    lines.push('_— YUNIX Store System_');
+
+    const message = lines.join('\n');
+    const encoded = encodeURIComponent(message);
+    const whatsappUrl = phone
+      ? `https://api.whatsapp.com/send?phone=${phone}&text=${encoded}`
+      : `https://api.whatsapp.com/send?text=${encoded}`;
+
+    res.json({ ok: true, message, whatsapp_url: whatsappUrl });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -277,7 +431,63 @@ router.patch('/:id/adjust', async (req, res) => {
       );
     }
 
-    res.json({ ok: true, note: reason || null });
+    // ── Price-Change Advisory (Wow Factor) ──────────────────────────────────
+    // If this delivery caused a price INCREASE, query the yield config to find
+    // any POS menu items that use this ingredient, and calculate cost impact
+    // per portion so the manager can be advised to review selling prices.
+    let priceWarning = null;
+    if (newCost !== null && oldCost !== null && newCost > oldCost && Number(delta) > 0) {
+      try {
+        // Fetch the item name for the advisory message
+        const itemMeta = await query(
+          'SELECT name FROM unix_store_inventory WHERE id = ?',
+          [req.params.id]
+        );
+        const itemName = itemMeta.length ? itemMeta[0].name : 'this item';
+
+        // Join yield config with uniCenta products table.
+        // LEFT JOIN ensures we handle missing products gracefully (they'll have NULL name).
+        // We only surface rows where portions_per_unit > 0 to avoid divide-by-zero.
+        const yieldRows = await query(
+          `SELECT
+             yc.portions_per_unit,
+             p.id            AS product_id,
+             p.name          AS product_name,
+             p.pricesell     AS sell_price
+           FROM unix_yield_config yc
+           LEFT JOIN products p ON yc.unicenta_product_id = p.id
+           WHERE yc.inventory_item_id = ?
+             AND yc.portions_per_unit > 0`,
+          [req.params.id]
+        );
+
+        // Only include rows that have a matched POS product
+        const impacted = yieldRows
+          .filter(r => r.product_name != null)
+          .map(r => ({
+            productName:        r.product_name,
+            sellPrice:          Number(r.sell_price || 0),
+            portionsPerUnit:    Number(r.portions_per_unit),
+            costRisePerPortion: parseFloat(((newCost - oldCost) / Number(r.portions_per_unit)).toFixed(2)),
+          }));
+
+        if (impacted.length > 0) {
+          const percentage = Math.round(((newCost - oldCost) / oldCost) * 100);
+          priceWarning = {
+            itemName,
+            oldCost,
+            newCost,
+            percentage,
+            impactedProducts: impacted,
+          };
+        }
+      } catch (yieldErr) {
+        // Non-fatal: yield config query failure must never block a stock receipt.
+        console.warn('[price-advisory] yield config query failed (non-fatal):', yieldErr.message);
+      }
+    }
+
+    res.json({ ok: true, note: reason || null, priceWarning });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

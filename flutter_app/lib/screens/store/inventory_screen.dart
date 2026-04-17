@@ -26,6 +26,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   bool _loading = true;
   String _search = '';
   String? _categoryFilter;
+  bool _reorderFilterActive = false;
 
   @override
   void initState() {
@@ -58,7 +59,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
           (item.category?.toLowerCase().contains(_search.toLowerCase()) ?? false);
       final matchCat = _categoryFilter == null ||
           item.category == _categoryFilter;
-      return matchSearch && matchCat;
+      final matchReorder = !_reorderFilterActive || item.needsReorder;
+      return matchSearch && matchCat && matchReorder;
     }).toList();
   }
 
@@ -163,12 +165,16 @@ class _InventoryScreenState extends State<InventoryScreen> {
       children: [
         // ── Header ────────────────────────────────────────────
         _InventoryHeader(
-          totalItems:        _items.length,
-          reorderCount:      _reorderCount,
-          onAdd:             () => _showItemDialog(),
-          onRefresh:         _loadData,
-          canManageCycleCount: widget.staff.canManageCycleCount,
-          onCycleCount:      _startCycleCount,
+          totalItems:           _items.length,
+          reorderCount:         _reorderCount,
+          reorderFilterActive:  _reorderFilterActive,
+          onToggleReorderFilter: () => setState(() {
+            _reorderFilterActive = !_reorderFilterActive;
+          }),
+          onAdd:                () => _showItemDialog(),
+          onRefresh:            _loadData,
+          canManageCycleCount:  widget.staff.canManageCycleCount,
+          onCycleCount:         _startCycleCount,
         ),
 
         // ── Search + Filter bar ────────────────────────────────
@@ -207,6 +213,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
 class _InventoryHeader extends StatelessWidget {
   final int totalItems;
   final int reorderCount;
+  final bool reorderFilterActive;
+  final VoidCallback onToggleReorderFilter;
   final VoidCallback onAdd;
   final VoidCallback onRefresh;
   final bool canManageCycleCount;
@@ -215,6 +223,8 @@ class _InventoryHeader extends StatelessWidget {
   const _InventoryHeader({
     required this.totalItems,
     required this.reorderCount,
+    required this.reorderFilterActive,
+    required this.onToggleReorderFilter,
     required this.onAdd,
     required this.onRefresh,
     required this.canManageCycleCount,
@@ -234,16 +244,62 @@ class _InventoryHeader extends StatelessWidget {
           const Text('Inventory',
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
           const SizedBox(width: 4),
-          // Stats chips
+          // Total items chip (static)
           _StatChip(
               label: '$totalItems items',
               color: AppTheme.primary,
               icon: Icons.inventory_2_rounded),
+          // Reorder alert chip — clickable to toggle filter
           if (reorderCount > 0)
-            _StatChip(
-              label: '$reorderCount need reorder',
-              color: AppTheme.debtRed,
-              icon: Icons.warning_amber_rounded,
+            Tooltip(
+              message: reorderFilterActive
+                  ? 'Showing only items needing reorder — click to clear'
+                  : 'Click to filter items needing reorder',
+              child: InkWell(
+                onTap: onToggleReorderFilter,
+                borderRadius: BorderRadius.circular(20),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: reorderFilterActive
+                        ? AppTheme.debtRed
+                        : AppTheme.debtRed.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: reorderFilterActive
+                        ? Border.all(color: AppTheme.debtRed, width: 1.5)
+                        : null,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        size: 14,
+                        color: reorderFilterActive
+                            ? Colors.white
+                            : AppTheme.debtRed,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        '$reorderCount need reorder',
+                        style: TextStyle(
+                          color: reorderFilterActive
+                              ? Colors.white
+                              : AppTheme.debtRed,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (reorderFilterActive) ...[
+                        const SizedBox(width: 6),
+                        const Icon(Icons.close_rounded,
+                            size: 14, color: Colors.white),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
             ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
@@ -877,9 +933,10 @@ class _AdjustStockDialogState extends State<_AdjustStockDialog> {
       return;
     }
     // If delivery mode, validate invoice cost is provided
+    double? totalCost;
     if (_isDelivery) {
-      final cost = double.tryParse(_totalCostCtrl.text.trim());
-      if (cost == null || cost <= 0) {
+      totalCost = double.tryParse(_totalCostCtrl.text.trim());
+      if (totalCost == null || totalCost <= 0) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Enter the total invoice cost (KES) for this delivery')));
         return;
@@ -887,15 +944,24 @@ class _AdjustStockDialogState extends State<_AdjustStockDialog> {
     }
     setState(() => _saving = true);
     try {
-      final delta     = _isDelivery ? amt : -amt;
-      final totalCost = double.tryParse(_totalCostCtrl.text.trim());
+      final delta = _isDelivery ? amt : -amt;
+
+      // Compute new cost per unit from invoice total ÷ quantity received.
+      // This lets the backend detect price changes and advise on POS margin impact.
+      double? newCostPerUnit;
+      if (_isDelivery && totalCost != null && amt > 0) {
+        newCostPerUnit = totalCost / amt;
+      }
+
       await ApiService.instance.adjustStock(
         widget.item.id,
         delta,
-        reason:     _reasonCtrl.text.trim(),
-        supplierId: _isDelivery ? _supplierId : null,
-        totalCost:  _isDelivery ? totalCost   : null,
+        reason:         _reasonCtrl.text.trim(),
+        supplierId:     _isDelivery ? _supplierId : null,
+        totalCost:      _isDelivery ? totalCost   : null,
+        newCostPerUnit: newCostPerUnit,
       );
+
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       setState(() => _saving = false);

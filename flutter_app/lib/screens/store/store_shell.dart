@@ -6,8 +6,7 @@ import '../pin_login.dart';
 import 'supplier_ledger.dart';
 import 'requisition_approval.dart';
 import 'inventory_screen.dart';
-import 'yield_config_screen.dart';
-import 'variance_screen.dart';
+import 'bi_shell.dart';
 import 'pay_runs_screen.dart';
 import 'purchase_orders_screen.dart';
 import 'procurement_screen.dart';
@@ -18,8 +17,7 @@ enum _NavItem {
   suppliers,
   inventory,
   requisitions,
-  yield_,
-  variance,
+  bi,
   payRuns,
   purchaseOrders,
   procurement,
@@ -82,15 +80,13 @@ class _StoreShellState extends State<StoreShell> {
       if (s.canManageInventory || s.canDraftPO) ...[
         (icon: Icons.people_alt_rounded,   label: 'Suppliers',       item: _NavItem.suppliers),
         (icon: Icons.inventory_2_rounded,  label: 'Inventory',       item: _NavItem.inventory),
-        if (_flag('module_yield_config'))
-          (icon: Icons.tune_rounded,           label: 'Yield Config',    item: _NavItem.yield_),
         if (_flag('module_purchase_orders'))
           (icon: Icons.shopping_cart_rounded,  label: 'Purchase Orders', item: _NavItem.purchaseOrders),
         if (_flag('module_procurement'))
           (icon: Icons.shopping_basket_rounded, label: 'Procurement',    item: _NavItem.procurement),
       ],
-      if (s.canViewVariance && _flag('module_variance'))
-        (icon: Icons.analytics_rounded,    label: 'Variance',        item: _NavItem.variance),
+      if (s.canAccessBI && _flag('module_bi'))
+        (icon: Icons.bar_chart_rounded, label: 'Business Intelligence', item: _NavItem.bi),
       // Phase 7: Pay Runs are now fully manager-led; Storekeepers no longer have access.
       if ((s.isManager || s.isOwner) && _flag('module_pay_runs'))
         (icon: Icons.payments_rounded,         label: 'Pay Runs',          item: _NavItem.payRuns),
@@ -110,10 +106,8 @@ class _StoreShellState extends State<StoreShell> {
         return InventoryScreen(staff: widget.staff);
       case _NavItem.requisitions:
         return RequisitionApprovalScreen(staff: widget.staff);
-      case _NavItem.yield_:
-        return const YieldConfigScreen();
-      case _NavItem.variance:
-        return const VarianceScreen();
+      case _NavItem.bi:
+        return const BIShell();
       case _NavItem.purchaseOrders:
         return PurchaseOrdersScreen(staff: widget.staff);
       case _NavItem.procurement:

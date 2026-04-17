@@ -66,6 +66,8 @@ const kAllCapabilities = <(String, String)>[
   ('can_manage_yield_config',     'Manage Yield Config'),
   ('can_manage_procurement',      'Manage Procurement'),
   ('can_manage_expense_accounts', 'Manage Expense Accounts'),
+  // Milestone 16: BI Hub access (consolidates can_view_variance + can_manage_yield_config)
+  ('can_access_bi',               'Access Business Intelligence Hub'),
 ];
 
 /// Default capabilities seeded per role when a new staff member is created.
@@ -89,6 +91,7 @@ List<String> defaultCapabilities(String role) => switch (role) {
                        'can_manage_yield_config',
                        'can_manage_procurement',
                        'can_manage_expense_accounts',
+                       'can_access_bi',
                      ],
       'owner'     => kAllCapabilities.map((e) => e.$1).toList(),
       'ict_admin' => ['can_manage_settings'],

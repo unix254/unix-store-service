@@ -58,4 +58,9 @@ class Staff {
   bool get canManageCycleCount      => hasCapability('can_manage_cycle_count')     || isManager || isOwner;
   /// Access to Expense Accounts (manager float / Cash-In workflows).
   bool get canManageExpenseAccounts => hasCapability('can_manage_expense_accounts') || isManager || isOwner;
+
+  // ── Milestone 16: Business Intelligence Hub ──────────────────
+  /// Gates the entire BI Hub (Variance, Yield Config, Price Impact Advisory).
+  /// Consolidates canViewVariance + canManageYieldConfig into a single flag.
+  bool get canAccessBI => hasCapability('can_access_bi') || isManager || isOwner;
 }

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../config/theme.dart';
 import '../../models/staff.dart';
 import '../../models/requisition.dart';
+import '../../models/supplier.dart';
 import '../../services/api.dart';
 
 final _timeFmt = DateFormat('HH:mm');
@@ -874,20 +875,33 @@ class _AddNewItemFromRequestDialogState
   late final TextEditingController _targetQtyCtrl;
   String? _category;
   late String _uom;
+  String? _purchaserId;          // default_purchaser_id (internal supplier)
+  List<Supplier> _purchasers = []; // internal suppliers for the dropdown
   bool _saving = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _nameCtrl      = TextEditingController(
-        text: widget.req.newItemName ?? '');
+    _nameCtrl      = TextEditingController(text: widget.req.newItemName ?? '');
     _reorderCtrl   = TextEditingController();
     _targetQtyCtrl = TextEditingController();
 
     // Pre-fill UOM from the requisition; fall back to 'pcs' if not in the list.
     final rawUom = widget.req.unitOfMeasure ?? widget.req.itemUom ?? 'pcs';
     _uom = _kUomOptions.contains(rawUom) ? rawUom : 'pcs';
+
+    _loadPurchasers();
+  }
+
+  Future<void> _loadPurchasers() async {
+    try {
+      final all = await ApiService.instance.getSuppliers();
+      if (!mounted) return;
+      setState(() => _purchasers = all.where((s) => s.isInternal).toList());
+    } catch (_) {
+      // Non-critical — purchaser dropdown simply stays empty if load fails
+    }
   }
 
   @override
@@ -916,11 +930,12 @@ class _AddNewItemFromRequestDialogState
           : null;
 
       await ApiService.instance.createInventoryItem({
-        'name':              _nameCtrl.text.trim(),
-        'category':          _category,
-        'unit_of_measure':   _uom,
-        'quantity_in_stock': 0,
-        'reorder_level':     double.parse(_reorderCtrl.text.trim()),
+        'name':                _nameCtrl.text.trim(),
+        'category':            _category,
+        'unit_of_measure':     _uom,
+        'quantity_in_stock':   0,
+        'reorder_level':       double.parse(_reorderCtrl.text.trim()),
+        if (_purchaserId != null) 'default_purchaser_id': _purchaserId,
         if (notesStr != null) 'notes': notesStr,
       });
 
@@ -1037,6 +1052,27 @@ class _AddNewItemFromRequestDialogState
                       .map((u) => DropdownMenuItem(value: u, child: Text(u)))
                       .toList(),
                   onChanged: (v) => setState(() => _uom = v!),
+                ),
+                const SizedBox(height: 12),
+
+                // Default Purchaser (internal supplier / manager float account)
+                DropdownButtonFormField<String?>(
+                  value: _purchaserId,
+                  decoration: const InputDecoration(
+                    labelText: 'Default Purchaser (who buys this item)',
+                    prefixIcon: Icon(Icons.account_balance_wallet_rounded),
+                    border: OutlineInputBorder(),
+                    helperText:
+                        'Assign to a manager account so this item appears in their next procurement run.',
+                    helperMaxLines: 2,
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                        value: null, child: Text('— Unassigned —')),
+                    ..._purchasers.map((s) =>
+                        DropdownMenuItem<String?>(value: s.id, child: Text(s.name))),
+                  ],
+                  onChanged: (v) => setState(() => _purchaserId = v),
                 ),
                 const SizedBox(height: 12),
 

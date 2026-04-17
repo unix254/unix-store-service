@@ -13,7 +13,6 @@ class VarianceScreen extends StatefulWidget {
 
 class _VarianceScreenState extends State<VarianceScreen> {
   List<Map<String, dynamic>> _rows = [];
-  List<Map<String, dynamic>> _inflation = [];
   bool _loading = true;
   String? _error;
   DateTime? _lastRefreshed;
@@ -37,14 +36,9 @@ class _VarianceScreenState extends State<VarianceScreen> {
     if (!mounted) return;
     setState(() { _loading = true; _error = null; });
     try {
-      final results = await Future.wait([
-        ApiService.instance.getVarianceToday(),
-        ApiService.instance.getInflationSummary().catchError((_) => <Map<String, dynamic>>[]),
-      ]);
+      _rows = await ApiService.instance.getVarianceToday();
       if (!mounted) return;
       setState(() {
-        _rows      = results[0] as List<Map<String, dynamic>>;
-        _inflation = results[1] as List<Map<String, dynamic>>;
         _lastRefreshed = DateTime.now();
         _loading = false;
       });
@@ -84,10 +78,6 @@ class _VarianceScreenState extends State<VarianceScreen> {
             underIssued: underIssued,
             onTrack: onTrack,
           ),
-
-        // ── Inflation heatmap ─────────────────────────────────────
-        if (!_loading && _inflation.isNotEmpty)
-          _InflationHeatmap(items: _inflation),
 
         // ── Content ────────────────────────────────────────────────
         Expanded(
@@ -421,94 +411,6 @@ Widget _TDColored({
         ],
       ),
     );
-
-// ── Inflation Heatmap ──────────────────────────────────────────────────────
-
-class _InflationHeatmap extends StatelessWidget {
-  final List<Map<String, dynamic>> items;
-  const _InflationHeatmap({required this.items});
-
-  @override
-  Widget build(BuildContext context) {
-    final kes = NumberFormat.currency(locale: 'en_KE', symbol: 'KES ', decimalDigits: 2);
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(24, 10, 24, 10),
-      color: const Color(0xFFFFF8E1),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: const [
-              Icon(Icons.trending_up_rounded, color: Color(0xFFE65100), size: 18),
-              SizedBox(width: 8),
-              Text('Price Impact — Recent Cost Changes',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: Color(0xFFBF360C))),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 10,
-            runSpacing: 8,
-            children: items.map((item) {
-              final name     = item['name']?.toString() ?? '—';
-              final oldCost  = double.tryParse(item['old_cost']?.toString() ?? '0') ?? 0;
-              final newCost  = double.tryParse(item['new_cost']?.toString() ?? '0') ?? 0;
-              final impact   = double.tryParse(item['weekly_impact_kes']?.toString() ?? '0') ?? 0;
-              final pctChange = oldCost > 0 ? ((newCost - oldCost) / oldCost * 100) : 0.0;
-              final isUp     = newCost > oldCost;
-              final chipColor = isUp
-                  ? const Color(0xFFFFCDD2)
-                  : const Color(0xFFC8E6C9);
-              final textColor = isUp
-                  ? const Color(0xFFB71C1C)
-                  : const Color(0xFF1B5E20);
-
-              return Tooltip(
-                message: 'Old: ${kes.format(oldCost)}  →  New: ${kes.format(newCost)}\n'
-                    'Weekly impact: ${impact >= 0 ? '+' : ''}${kes.format(impact)}',
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: chipColor,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: textColor.withOpacity(0.3)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        isUp ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
-                        size: 13,
-                        color: textColor,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(name,
-                          style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: textColor)),
-                      const SizedBox(width: 6),
-                      Text(
-                        '${pctChange >= 0 ? '+' : ''}${pctChange.toStringAsFixed(1)}%',
-                        style: TextStyle(
-                            fontSize: 11,
-                            color: textColor.withOpacity(0.8)),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 // ── Empty / Error states ───────────────────────────────────────────────────
 
