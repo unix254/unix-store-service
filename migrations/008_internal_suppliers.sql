@@ -11,7 +11,7 @@ USE unicentapos;
 --    is_internal = 1 means this supplier record represents
 --    a manager who holds company cash (not an external vendor).
 -- ─────────────────────────────────────────────────────────────
-ALTER TABLE unix_suppliers
+ALTER TABLE store_suppliers
   ADD COLUMN IF NOT EXISTS is_internal TINYINT(1) NOT NULL DEFAULT 0;
 
 -- ─────────────────────────────────────────────────────────────
@@ -19,15 +19,15 @@ ALTER TABLE unix_suppliers
 --    Points to an internal supplier (manager) who is responsible
 --    for buying this item. Used to route procurement lists.
 -- ─────────────────────────────────────────────────────────────
-ALTER TABLE unix_store_inventory
+ALTER TABLE store_inventory
   ADD COLUMN IF NOT EXISTS default_purchaser_id VARCHAR(36) NULL;
 
-ALTER TABLE unix_store_inventory
+ALTER TABLE store_inventory
   DROP FOREIGN KEY IF EXISTS fk_inventory_purchaser;
 
-ALTER TABLE unix_store_inventory
+ALTER TABLE store_inventory
   ADD CONSTRAINT fk_inventory_purchaser
-  FOREIGN KEY (default_purchaser_id) REFERENCES unix_suppliers(id)
+  FOREIGN KEY (default_purchaser_id) REFERENCES store_suppliers(id)
   ON DELETE SET NULL;
 
 -- ─────────────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ ALTER TABLE unix_store_inventory
 --    payment_source_id: internal supplier (manager) who paid
 --    payment_reference: MPesa code or bank ref
 -- ─────────────────────────────────────────────────────────────
-ALTER TABLE unix_pay_run_details
+ALTER TABLE store_pay_run_details
   ADD COLUMN IF NOT EXISTS payment_source_id  VARCHAR(36)  NULL,
   ADD COLUMN IF NOT EXISTS payment_reference  VARCHAR(100) NULL,
   ADD COLUMN IF NOT EXISTS disbursed_by       VARCHAR(100) NULL,
@@ -45,7 +45,7 @@ ALTER TABLE unix_pay_run_details
 -- 4. Procurement logs
 --    Audit trail for every generated procurement list.
 -- ─────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS unix_procurement_logs (
+CREATE TABLE IF NOT EXISTS store_procurement_logs (
   id            VARCHAR(36)   NOT NULL,
   generated_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   generated_by  VARCHAR(100)  NULL,

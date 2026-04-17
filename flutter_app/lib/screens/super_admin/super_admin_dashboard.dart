@@ -76,7 +76,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               style: TextStyle(color: Colors.white, fontSize: 17)),
         ]),
         content: const Text(
-          'This will permanently DELETE all transactional unix_ data:\n\n'
+          'This will permanently DELETE all transactional store_ data:\n\n'
           '❌  Supplier Ledger entries\n'
           '❌  Pay Runs & details\n'
           '❌  Requisitions\n'

@@ -33,7 +33,7 @@ router.post('/generate', async (req, res) => {
 
     // Load business name for message header
     const settingsRows = await query(
-      `SELECT setting_key, setting_value FROM unix_settings
+      `SELECT setting_key, setting_value FROM yunix_settings
        WHERE setting_key IN ('business_name', 'slogan')`
     );
     const settingsMap = {};
@@ -58,11 +58,11 @@ router.post('/generate', async (req, res) => {
           + (COALESCE(usage30.daily_avg, 0) * COALESCE(i.lead_time_days, 1)),
           3
         )) AS suggested_qty
-      FROM unix_store_inventory i
-      LEFT JOIN unix_suppliers p ON p.id = i.default_purchaser_id AND p.is_internal = 1
+      FROM store_inventory i
+      LEFT JOIN store_suppliers p ON p.id = i.default_purchaser_id AND p.is_internal = 1
       LEFT JOIN (
         SELECT inventory_item_id, ROUND(SUM(quantity) / 30, 3) AS daily_avg
-        FROM unix_requisitions
+        FROM store_requisitions
         WHERE status = 'Issued'
           AND requested_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
         GROUP BY inventory_item_id
@@ -140,7 +140,7 @@ router.post('/generate', async (req, res) => {
     // Log the generation
     const logId = uuidv4();
     await query(
-      `INSERT INTO unix_procurement_logs (id, generated_by, item_count, groups_json)
+      `INSERT INTO store_procurement_logs (id, generated_by, item_count, groups_json)
        VALUES (?, ?, ?, ?)`,
       [logId, generated_by || null, items.length, JSON.stringify(
         groups.map(g => ({
@@ -172,7 +172,7 @@ router.post('/build-whatsapp', async (req, res) => {
     }
 
     const settingsRows = await query(
-      `SELECT setting_key, setting_value FROM unix_settings
+      `SELECT setting_key, setting_value FROM yunix_settings
        WHERE setting_key IN ('business_name', 'slogan')`
     );
     const sm = {};
@@ -232,7 +232,7 @@ router.get('/logs', async (req, res) => {
   try {
     const rows = await query(`
       SELECT id, generated_at, generated_by, item_count, groups_json
-      FROM unix_procurement_logs
+      FROM store_procurement_logs
       ORDER BY generated_at DESC
       LIMIT 50
     `);

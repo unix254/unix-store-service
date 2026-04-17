@@ -11,6 +11,6 @@ USE unicentapos;
 -- (manager) ledgers to record bank withdrawals / float top-ups.
 -- It reduces the manager's outstanding balance, just like PAYMENT.
 -- ─────────────────────────────────────────────────────────────
-ALTER TABLE unix_supplier_ledger
+ALTER TABLE store_supplier_ledger
   MODIFY COLUMN transaction_type
     ENUM('PURCHASE', 'PAYMENT', 'SUPPLIER_PAYMENT', 'CASH_IN') NOT NULL;

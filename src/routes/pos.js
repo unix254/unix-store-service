@@ -102,7 +102,7 @@ router.get('/sales/range', async (req, res) => {
 
 // GET /api/pos/variance/today
 // Core of the Usage Variance engine:
-// Compares what the store ISSUED (unix_requisitions, purpose=Sales, today)
+// Compares what the store ISSUED (store_requisitions, purpose=Sales, today)
 // vs what the POS SOLD (ticketlines, today), using the yield config to convert.
 //
 // AGGREGATION FIX: Group by inventory item (i.id) to prevent double-counting
@@ -129,8 +129,8 @@ router.get('/variance/today', async (req, res) => {
           - SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit),
           3
         )                                   AS variance_qty
-      FROM unix_yield_config yc
-      JOIN unix_store_inventory i  ON i.id  = yc.inventory_item_id
+      FROM store_yield_config yc
+      JOIN store_inventory i  ON i.id  = yc.inventory_item_id
       LEFT JOIN products p         ON p.id  = yc.unicenta_product_id
       LEFT JOIN (
         -- Today's POS sales per product
@@ -150,7 +150,7 @@ router.get('/variance/today', async (req, res) => {
           SUM(CASE WHEN purpose = 'Sales'    THEN quantity ELSE 0 END)
           - SUM(CASE WHEN purpose = 'Wastage' THEN quantity ELSE 0 END)
             AS total_issued
-        FROM unix_requisitions
+        FROM store_requisitions
         WHERE status = 'Issued'
           AND purpose IN ('Sales', 'Wastage')
           AND DATE(issued_at) = CURDATE()

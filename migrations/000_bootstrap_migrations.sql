@@ -1,17 +1,17 @@
--- Migration 000: Bootstrap the unix_migrations tracking table.
+-- Migration 000: Bootstrap the store_migrations tracking table.
 -- Seeds all previously-applied migration files (001–013) so the new
 -- tracked runner does not attempt to re-run them on restart.
 -- Migrations 014 and 015 are NOT seeded here — they run fresh on next startup.
 
-CREATE TABLE IF NOT EXISTS unix_migrations (
+CREATE TABLE IF NOT EXISTS store_migrations (
   filename     VARCHAR(255) NOT NULL PRIMARY KEY,
   applied_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Only insert the legacy files as "already applied" IF the original unix schema was 
--- already deployed (which we detect by the existence of unix_staff).
+-- already deployed (which we detect by the existence of yunix_staff).
 -- This protects fresh production installations from skipping crucial migrations.
-INSERT IGNORE INTO unix_migrations (filename)
+INSERT IGNORE INTO store_migrations (filename)
 SELECT m.filename FROM (
   SELECT '001_init_unix_schema.sql' AS filename
   UNION SELECT '002_add_staff_pins.sql'
@@ -29,5 +29,5 @@ SELECT m.filename FROM (
 ) AS m
 WHERE EXISTS (
   SELECT 1 FROM information_schema.tables 
-  WHERE table_schema = DATABASE() AND table_name = 'unix_staff'
+  WHERE table_schema = DATABASE() AND table_name = 'yunix_staff'
 );

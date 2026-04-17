@@ -9,6 +9,6 @@ USE unicentapos;
 --   (may differ from the originally requested quantity).
 -- issue_notes: reason text attached by the storekeeper when
 --   adjusting quantity or rejecting a requisition.
-ALTER TABLE unix_requisitions
+ALTER TABLE store_requisitions
   ADD COLUMN IF NOT EXISTS issued_quantity DECIMAL(10,3) NULL,
   ADD COLUMN IF NOT EXISTS issue_notes     VARCHAR(500)  NULL;

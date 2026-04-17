@@ -6,7 +6,7 @@
 
 USE unicentapos;
 
-CREATE TABLE IF NOT EXISTS unix_staff (
+CREATE TABLE IF NOT EXISTS yunix_staff (
   id         VARCHAR(36)                          NOT NULL,
   name       VARCHAR(100)                         NOT NULL,
   pin        CHAR(4)                              NOT NULL,
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS unix_staff (
 
 -- Seed default staff so the system is usable immediately after first deploy.
 -- Owner should change these PINs after first login.
-INSERT IGNORE INTO unix_staff (id, name, pin, role) VALUES
+INSERT IGNORE INTO yunix_staff (id, name, pin, role) VALUES
   ('00000000-0000-0000-0000-000000000001', 'Store Keeper', '1111', 'store'),
   ('00000000-0000-0000-0000-000000000002', 'Manager',      '9999', 'manager'),
   ('00000000-0000-0000-0000-000000000003', 'Kitchen Staff', '2222', 'kitchen');

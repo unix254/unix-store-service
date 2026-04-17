@@ -544,7 +544,7 @@ class ApiService {
     });
   }
 
-  /// Wipes all transactional unix_ tables. Credentials re-verified server-side.
+  /// Wipes all transactional store_ tables. Credentials re-verified server-side.
   Future<Map<String, dynamic>> goLiveWipe(String username, String password) async {
     final data = await _post('/api/admin/go-live-wipe', {
       'username': username,

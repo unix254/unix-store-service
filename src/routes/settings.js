@@ -8,7 +8,7 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     const rows = await query(
-      'SELECT setting_key, setting_value FROM unix_settings ORDER BY id'
+      'SELECT setting_key, setting_value FROM yunix_settings ORDER BY id'
     );
     const result = {};
     rows.forEach(r => { result[r.setting_key] = r.setting_value; });
@@ -29,7 +29,7 @@ router.patch('/', async (req, res) => {
   try {
     for (const [key, value] of Object.entries(updates)) {
       await query(
-        `INSERT INTO unix_settings (setting_key, setting_value)
+        `INSERT INTO yunix_settings (setting_key, setting_value)
          VALUES (?, ?)
          ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
         [key, String(value)]

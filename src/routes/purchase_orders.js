@@ -10,8 +10,8 @@ router.get('/', async (req, res) => {
   try {
     const rows = await query(`
       SELECT po.*, COUNT(pd.id) AS item_count
-      FROM unix_purchase_orders po
-      LEFT JOIN unix_po_details pd ON pd.po_id = po.id
+      FROM store_purchase_orders po
+      LEFT JOIN store_po_details pd ON pd.po_id = po.id
       GROUP BY po.id
       ORDER BY po.created_at DESC
     `);
@@ -30,8 +30,8 @@ router.get('/:id', async (req, res) => {
 
     const [po] = await query(
       `SELECT po.*, COUNT(pd.id) AS item_count
-       FROM unix_purchase_orders po
-       LEFT JOIN unix_po_details pd ON pd.po_id = po.id
+       FROM store_purchase_orders po
+       LEFT JOIN store_po_details pd ON pd.po_id = po.id
        WHERE po.id = ?
        GROUP BY po.id`,
       [id]
@@ -44,9 +44,9 @@ router.get('/:id', async (req, res) => {
     const details = await query(`
       SELECT pd.*, i.name AS item_name, i.unit_of_measure, i.quantity_in_stock, i.reorder_level,
              s.name AS supplier_name, s.phone AS supplier_phone
-      FROM unix_po_details pd
-      JOIN unix_store_inventory i ON i.id = pd.inventory_item_id
-      LEFT JOIN unix_suppliers s ON s.id = pd.supplier_id
+      FROM store_po_details pd
+      JOIN store_inventory i ON i.id = pd.inventory_item_id
+      LEFT JOIN store_suppliers s ON s.id = pd.supplier_id
       WHERE pd.po_id = ?
       ORDER BY s.name, i.name
     `, [id]);
@@ -75,11 +75,11 @@ router.post('/auto-draft', async (req, res) => {
           + (COALESCE(rs_usage.daily_avg, 0) * COALESCE(i.lead_time_days, 1)),
           3
         )) AS suggested_order_qty
-      FROM unix_store_inventory i
-      LEFT JOIN unix_suppliers s ON s.id = i.supplier_id
+      FROM store_inventory i
+      LEFT JOIN store_suppliers s ON s.id = i.supplier_id
       LEFT JOIN (
         SELECT inventory_item_id, SUM(quantity) / 30.0 AS daily_avg
-        FROM unix_requisitions
+        FROM store_requisitions
         WHERE status = 'Issued' AND purpose = 'Sales'
           AND issued_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
         GROUP BY inventory_item_id
@@ -94,13 +94,13 @@ router.post('/auto-draft', async (req, res) => {
 
     const poId = uuidv4();
     await query(
-      `INSERT INTO unix_purchase_orders (id, status, created_by) VALUES (?, 'DRAFT', ?)`,
+      `INSERT INTO store_purchase_orders (id, status, created_by) VALUES (?, 'DRAFT', ?)`,
       [poId, created_by || null]
     );
 
     for (const item of items) {
       await query(
-        `INSERT INTO unix_po_details (id, po_id, inventory_item_id, supplier_id, suggested_qty, approved_qty)
+        `INSERT INTO store_po_details (id, po_id, inventory_item_id, supplier_id, suggested_qty, approved_qty)
          VALUES (?, ?, ?, ?, ?, 0)`,
         [uuidv4(), poId, item.id, item.supplier_id || null, item.suggested_order_qty]
       );
@@ -108,8 +108,8 @@ router.post('/auto-draft', async (req, res) => {
 
     const [po] = await query(
       `SELECT po.*, COUNT(pd.id) AS item_count
-       FROM unix_purchase_orders po
-       LEFT JOIN unix_po_details pd ON pd.po_id = po.id
+       FROM store_purchase_orders po
+       LEFT JOIN store_po_details pd ON pd.po_id = po.id
        WHERE po.id = ?
        GROUP BY po.id`,
       [poId]
@@ -118,9 +118,9 @@ router.post('/auto-draft', async (req, res) => {
     const details = await query(`
       SELECT pd.*, i.name AS item_name, i.unit_of_measure, i.quantity_in_stock, i.reorder_level,
              s.name AS supplier_name, s.phone AS supplier_phone
-      FROM unix_po_details pd
-      JOIN unix_store_inventory i ON i.id = pd.inventory_item_id
-      LEFT JOIN unix_suppliers s ON s.id = pd.supplier_id
+      FROM store_po_details pd
+      JOIN store_inventory i ON i.id = pd.inventory_item_id
+      LEFT JOIN store_suppliers s ON s.id = pd.supplier_id
       WHERE pd.po_id = ?
       ORDER BY s.name, i.name
     `, [poId]);
@@ -143,13 +143,13 @@ router.post('/:id/details', async (req, res) => {
       return res.status(400).json({ error: 'inventory_item_id is required' });
     }
 
-    const [po] = await query('SELECT id, status FROM unix_purchase_orders WHERE id = ?', [id]);
+    const [po] = await query('SELECT id, status FROM store_purchase_orders WHERE id = ?', [id]);
     if (!po) {
       return res.status(404).json({ error: 'Purchase order not found' });
     }
 
     const [item] = await query(
-      'SELECT id, name, unit_of_measure, quantity_in_stock, reorder_level FROM unix_store_inventory WHERE id = ?',
+      'SELECT id, name, unit_of_measure, quantity_in_stock, reorder_level FROM store_inventory WHERE id = ?',
       [inventory_item_id]
     );
     if (!item) {
@@ -158,7 +158,7 @@ router.post('/:id/details', async (req, res) => {
 
     const detailId = uuidv4();
     await query(
-      `INSERT INTO unix_po_details (id, po_id, inventory_item_id, supplier_id, suggested_qty, approved_qty)
+      `INSERT INTO store_po_details (id, po_id, inventory_item_id, supplier_id, suggested_qty, approved_qty)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [
         detailId,
@@ -173,9 +173,9 @@ router.post('/:id/details', async (req, res) => {
     const [detail] = await query(`
       SELECT pd.*, i.name AS item_name, i.unit_of_measure, i.quantity_in_stock, i.reorder_level,
              s.name AS supplier_name, s.phone AS supplier_phone
-      FROM unix_po_details pd
-      JOIN unix_store_inventory i ON i.id = pd.inventory_item_id
-      LEFT JOIN unix_suppliers s ON s.id = pd.supplier_id
+      FROM store_po_details pd
+      JOIN store_inventory i ON i.id = pd.inventory_item_id
+      LEFT JOIN store_suppliers s ON s.id = pd.supplier_id
       WHERE pd.id = ?
     `, [detailId]);
 
@@ -194,7 +194,7 @@ router.put('/:id/details/:detailId', async (req, res) => {
     const { approved_qty, supplier_id } = req.body;
 
     const [detail] = await query(
-      'SELECT id FROM unix_po_details WHERE id = ? AND po_id = ?',
+      'SELECT id FROM store_po_details WHERE id = ? AND po_id = ?',
       [detailId, id]
     );
     if (!detail) {
@@ -218,14 +218,14 @@ router.put('/:id/details/:detailId', async (req, res) => {
     }
 
     values.push(detailId);
-    await query(`UPDATE unix_po_details SET ${fields.join(', ')} WHERE id = ?`, values);
+    await query(`UPDATE store_po_details SET ${fields.join(', ')} WHERE id = ?`, values);
 
     const [updated] = await query(`
       SELECT pd.*, i.name AS item_name, i.unit_of_measure, i.quantity_in_stock, i.reorder_level,
              s.name AS supplier_name, s.phone AS supplier_phone
-      FROM unix_po_details pd
-      JOIN unix_store_inventory i ON i.id = pd.inventory_item_id
-      LEFT JOIN unix_suppliers s ON s.id = pd.supplier_id
+      FROM store_po_details pd
+      JOIN store_inventory i ON i.id = pd.inventory_item_id
+      LEFT JOIN store_suppliers s ON s.id = pd.supplier_id
       WHERE pd.id = ?
     `, [detailId]);
 
@@ -243,14 +243,14 @@ router.delete('/:id/details/:detailId', async (req, res) => {
     const { id, detailId } = req.params;
 
     const [detail] = await query(
-      'SELECT id FROM unix_po_details WHERE id = ? AND po_id = ?',
+      'SELECT id FROM store_po_details WHERE id = ? AND po_id = ?',
       [detailId, id]
     );
     if (!detail) {
       return res.status(404).json({ error: 'Detail line not found' });
     }
 
-    await query('DELETE FROM unix_po_details WHERE id = ?', [detailId]);
+    await query('DELETE FROM store_po_details WHERE id = ?', [detailId]);
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE /purchase-orders/:id/details/:detailId error:', err);
@@ -264,7 +264,7 @@ router.patch('/:id/submit', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const [po] = await query('SELECT * FROM unix_purchase_orders WHERE id = ?', [id]);
+    const [po] = await query('SELECT * FROM store_purchase_orders WHERE id = ?', [id]);
     if (!po) {
       return res.status(404).json({ error: 'Purchase order not found' });
     }
@@ -273,11 +273,11 @@ router.patch('/:id/submit', async (req, res) => {
     }
 
     await query(
-      `UPDATE unix_purchase_orders SET status = 'PENDING_APPROVAL' WHERE id = ?`,
+      `UPDATE store_purchase_orders SET status = 'PENDING_APPROVAL' WHERE id = ?`,
       [id]
     );
 
-    const [updated] = await query('SELECT * FROM unix_purchase_orders WHERE id = ?', [id]);
+    const [updated] = await query('SELECT * FROM store_purchase_orders WHERE id = ?', [id]);
     res.json(updated);
   } catch (err) {
     console.error('PATCH /purchase-orders/:id/submit error:', err);
@@ -296,7 +296,7 @@ router.patch('/:id/approve', async (req, res) => {
       return res.status(400).json({ error: 'approved_by is required' });
     }
 
-    const [po] = await query('SELECT * FROM unix_purchase_orders WHERE id = ?', [id]);
+    const [po] = await query('SELECT * FROM store_purchase_orders WHERE id = ?', [id]);
     if (!po) {
       return res.status(404).json({ error: 'Purchase order not found' });
     }
@@ -305,11 +305,11 @@ router.patch('/:id/approve', async (req, res) => {
     }
 
     await query(
-      `UPDATE unix_purchase_orders SET status = 'APPROVED', approved_by = ?, approved_at = NOW() WHERE id = ?`,
+      `UPDATE store_purchase_orders SET status = 'APPROVED', approved_by = ?, approved_at = NOW() WHERE id = ?`,
       [approved_by, id]
     );
 
-    const [updated] = await query('SELECT * FROM unix_purchase_orders WHERE id = ?', [id]);
+    const [updated] = await query('SELECT * FROM store_purchase_orders WHERE id = ?', [id]);
     res.json(updated);
   } catch (err) {
     console.error('PATCH /purchase-orders/:id/approve error:', err);

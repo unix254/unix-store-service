@@ -1,6 +1,6 @@
 -- ============================================================
 -- Yunix Store Controller – Business Settings
--- Creates unix_settings key-value store and seeds defaults.
+-- Creates yunix_settings key-value store and seeds defaults.
 -- Also grants can_manage_settings to existing managers/owners.
 -- ============================================================
 
@@ -9,7 +9,7 @@ USE unicentapos;
 -- ─────────────────────────────────────────────────────────────
 -- 1. Settings table
 -- ─────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS unix_settings (
+CREATE TABLE IF NOT EXISTS yunix_settings (
   id            INT          NOT NULL AUTO_INCREMENT,
   setting_key   VARCHAR(100) NOT NULL,
   setting_value TEXT         NOT NULL DEFAULT '',
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS unix_settings (
 -- ─────────────────────────────────────────────────────────────
 -- 2. Seed default values (idempotent)
 -- ─────────────────────────────────────────────────────────────
-INSERT INTO unix_settings (setting_key, setting_value) VALUES
+INSERT INTO yunix_settings (setting_key, setting_value) VALUES
   ('business_name', 'Yunix Store'),
   ('slogan',        'Premium Restaurant Management')
 ON DUPLICATE KEY UPDATE setting_key = setting_key;
@@ -31,7 +31,7 @@ ON DUPLICATE KEY UPDATE setting_key = setting_key;
 -- 3. Grant can_manage_settings to existing managers & owners
 --    (only if not already present and capabilities is not null)
 -- ─────────────────────────────────────────────────────────────
-UPDATE unix_staff
+UPDATE yunix_staff
   SET capabilities = JSON_ARRAY_APPEND(capabilities, '$', 'can_manage_settings')
   WHERE role IN ('manager', 'owner')
     AND capabilities IS NOT NULL

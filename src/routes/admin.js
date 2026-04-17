@@ -39,7 +39,7 @@ router.post('/super-login', (req, res) => {
 
 // POST /api/admin/go-live-wipe
 // Body: { username, password }
-// Wipes ONLY transactional unix_ tables. Master data and config are preserved.
+// Wipes ONLY transactional store_ tables. Master data and config are preserved.
 // Credentials are re-verified on every wipe call (no token caching).
 router.post('/go-live-wipe', async (req, res) => {
   const { username, password } = req.body;
@@ -50,14 +50,14 @@ router.post('/go-live-wipe', async (req, res) => {
   if (!check.ok) return res.status(check.status).json({ error: check.error });
 
   // Strictly transactional tables — ordered to handle FK dependencies
-  // unix_po_details and unix_pay_run_details are children and must go first.
+  // store_po_details and store_pay_run_details are children and must go first.
   const transactionalTables = [
-    'unix_po_details',
-    'unix_purchase_orders',
-    'unix_pay_run_details',
-    'unix_pay_runs',
-    'unix_supplier_ledger',
-    'unix_requisitions',
+    'store_po_details',
+    'store_purchase_orders',
+    'store_pay_run_details',
+    'store_pay_runs',
+    'store_supplier_ledger',
+    'store_requisitions',
   ];
 
   const conn = await pool.getConnection();

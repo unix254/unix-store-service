@@ -15,9 +15,9 @@ router.get('/', async (req, res) => {
         s.lead_time_days AS supplier_lead_time_days,
         p.name  AS default_purchaser_name,
         (i.reorder_level IS NOT NULL AND i.quantity_in_stock <= i.reorder_level) AS needs_reorder
-      FROM unix_store_inventory i
-      LEFT JOIN unix_suppliers s ON s.id = i.supplier_id
-      LEFT JOIN unix_suppliers p ON p.id = i.default_purchaser_id
+      FROM store_inventory i
+      LEFT JOIN store_suppliers s ON s.id = i.supplier_id
+      LEFT JOIN store_suppliers p ON p.id = i.default_purchaser_id
       ORDER BY i.category, i.name
     `);
     res.json(rows);
@@ -36,8 +36,8 @@ router.get('/alerts/reorder', async (req, res) => {
         s.name AS supplier_name,
         s.phone AS supplier_phone,
         s.lead_time_days AS supplier_lead_time_days
-      FROM unix_store_inventory i
-      LEFT JOIN unix_suppliers s ON s.id = i.supplier_id
+      FROM store_inventory i
+      LEFT JOIN store_suppliers s ON s.id = i.supplier_id
       WHERE i.reorder_level IS NOT NULL
         AND i.quantity_in_stock <= i.reorder_level
       ORDER BY (i.quantity_in_stock / NULLIF(i.reorder_level, 0)) ASC
@@ -81,12 +81,12 @@ router.get('/draft-po', async (req, res) => {
             3
           )
         ) AS suggested_order_qty
-      FROM unix_store_inventory i
-      LEFT JOIN unix_suppliers s ON s.id = i.supplier_id
+      FROM store_inventory i
+      LEFT JOIN store_suppliers s ON s.id = i.supplier_id
       LEFT JOIN (
         SELECT inventory_item_id,
                ROUND(SUM(quantity) / 30, 3) AS daily_avg
-        FROM unix_requisitions
+        FROM store_requisitions
         WHERE status = 'Issued'
           AND requested_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
         GROUP BY inventory_item_id
@@ -107,7 +107,7 @@ router.get('/draft-po', async (req, res) => {
 router.get('/cost-history/:id', async (req, res) => {
   try {
     const rows = await query(
-      `SELECT * FROM unix_cost_history WHERE inventory_item_id = ? ORDER BY changed_at DESC LIMIT 50`,
+      `SELECT * FROM store_cost_history WHERE inventory_item_id = ? ORDER BY changed_at DESC LIMIT 50`,
       [req.params.id]
     );
     res.json(rows);
@@ -149,24 +149,24 @@ router.get('/inflation-summary', async (req, res) => {
                      / yc.portions_per_unit, 4)
           ELSE NULL
         END                                                            AS cost_rise_per_portion
-      FROM unix_cost_history ch
-      JOIN unix_store_inventory i ON i.id = ch.inventory_item_id
+      FROM store_cost_history ch
+      JOIN store_inventory i ON i.id = ch.inventory_item_id
       JOIN (
         SELECT inventory_item_id, changed_at,
                ROW_NUMBER() OVER (PARTITION BY inventory_item_id ORDER BY changed_at DESC) AS rn
-        FROM unix_cost_history
+        FROM store_cost_history
         WHERE changed_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
       ) latest ON latest.inventory_item_id = ch.inventory_item_id
               AND latest.changed_at = ch.changed_at
       LEFT JOIN (
         SELECT inventory_item_id, ROUND(SUM(quantity) / 4, 3) AS qty
-        FROM unix_requisitions
+        FROM store_requisitions
         WHERE status = 'Issued'
           AND requested_at >= DATE_SUB(CURDATE(), INTERVAL 28 DAY)
         GROUP BY inventory_item_id
       ) weekly ON weekly.inventory_item_id = i.id
       -- Join yield configs so we know which POS products use this ingredient
-      LEFT JOIN unix_yield_config yc ON yc.inventory_item_id = i.id
+      LEFT JOIN store_yield_config yc ON yc.inventory_item_id = i.id
                                      AND yc.portions_per_unit > 0
       -- Join POS products table (read-only uniCenta table)
       LEFT JOIN products p ON p.id = yc.unicenta_product_id
@@ -238,23 +238,23 @@ router.post('/send-price-impact', async (req, res) => {
                      / yc.portions_per_unit, 2)
           ELSE NULL
         END                                                            AS cost_rise_per_portion
-      FROM unix_cost_history ch
-      JOIN unix_store_inventory i ON i.id = ch.inventory_item_id
+      FROM store_cost_history ch
+      JOIN store_inventory i ON i.id = ch.inventory_item_id
       JOIN (
         SELECT inventory_item_id, changed_at,
                ROW_NUMBER() OVER (PARTITION BY inventory_item_id ORDER BY changed_at DESC) AS rn
-        FROM unix_cost_history
+        FROM store_cost_history
         WHERE changed_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
       ) latest ON latest.inventory_item_id = ch.inventory_item_id
               AND latest.changed_at = ch.changed_at
       LEFT JOIN (
         SELECT inventory_item_id, ROUND(SUM(quantity) / 4, 3) AS qty
-        FROM unix_requisitions
+        FROM store_requisitions
         WHERE status = 'Issued'
           AND requested_at >= DATE_SUB(CURDATE(), INTERVAL 28 DAY)
         GROUP BY inventory_item_id
       ) weekly ON weekly.inventory_item_id = i.id
-      LEFT JOIN unix_yield_config yc ON yc.inventory_item_id = i.id AND yc.portions_per_unit > 0
+      LEFT JOIN store_yield_config yc ON yc.inventory_item_id = i.id AND yc.portions_per_unit > 0
       LEFT JOIN products p ON p.id = yc.unicenta_product_id
       WHERE latest.rn = 1
       ORDER BY ABS(weekly_impact_kes) DESC, i.name ASC
@@ -315,8 +315,8 @@ router.get('/:id', async (req, res) => {
   try {
     const rows = await query(
       `SELECT i.*, s.name AS supplier_name
-       FROM unix_store_inventory i
-       LEFT JOIN unix_suppliers s ON s.id = i.supplier_id
+       FROM store_inventory i
+       LEFT JOIN store_suppliers s ON s.id = i.supplier_id
        WHERE i.id = ?`,
       [req.params.id]
     );
@@ -336,7 +336,7 @@ router.post('/', async (req, res) => {
   const id = uuidv4();
   try {
     await query(
-      `INSERT INTO unix_store_inventory
+      `INSERT INTO store_inventory
          (id, name, category, unit_of_measure, quantity_in_stock, reorder_level,
           cost_per_unit, supplier_id, notes, lead_time_days, default_purchaser_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -356,7 +356,7 @@ router.put('/:id', async (req, res) => {
           cost_per_unit, supplier_id, notes, lead_time_days, default_purchaser_id } = req.body;
   try {
     await query(
-      `UPDATE unix_store_inventory
+      `UPDATE store_inventory
        SET name=?, category=?, unit_of_measure=?, quantity_in_stock=?,
            reorder_level=?, cost_per_unit=?, supplier_id=?, notes=?,
            lead_time_days=?, default_purchaser_id=?
@@ -374,16 +374,16 @@ router.put('/:id', async (req, res) => {
 
 // PATCH /api/inventory/:id/adjust  – adjust stock quantity
 // body: { delta, reason?, new_cost_per_unit?, changed_by?, supplier_id?, total_cost? }
-// • If new_cost_per_unit differs from current cost, logs to unix_cost_history.
+// • If new_cost_per_unit differs from current cost, logs to store_cost_history.
 // • If delta > 0 AND supplier_id + total_cost provided (delivery), automatically posts a
-//   PURCHASE entry to unix_supplier_ledger so the debt is linked on the spot.
+//   PURCHASE entry to store_supplier_ledger so the debt is linked on the spot.
 router.patch('/:id/adjust', async (req, res) => {
   const { delta, reason, new_cost_per_unit, changed_by, supplier_id, total_cost } = req.body;
   if (delta === undefined) return res.status(400).json({ error: 'delta is required' });
   try {
     // Fetch current item
     const current = await query(
-      'SELECT cost_per_unit FROM unix_store_inventory WHERE id = ?',
+      'SELECT cost_per_unit FROM store_inventory WHERE id = ?',
       [req.params.id]
     );
     if (!current.length) return res.status(404).json({ error: 'Item not found' });
@@ -394,7 +394,7 @@ router.patch('/:id/adjust', async (req, res) => {
     // Update stock (and cost if provided)
     if (newCost != null) {
       await query(
-        `UPDATE unix_store_inventory
+        `UPDATE store_inventory
          SET quantity_in_stock = quantity_in_stock + ?, cost_per_unit = ?
          WHERE id = ?`,
         [delta, newCost, req.params.id]
@@ -402,14 +402,14 @@ router.patch('/:id/adjust', async (req, res) => {
       // Log cost change if different from old cost
       if (oldCost !== newCost) {
         await query(
-          `INSERT INTO unix_cost_history (id, inventory_item_id, old_cost, new_cost, changed_by)
+          `INSERT INTO store_cost_history (id, inventory_item_id, old_cost, new_cost, changed_by)
            VALUES (?, ?, ?, ?, ?)`,
           [uuidv4(), req.params.id, oldCost, newCost, changed_by || null]
         );
       }
     } else {
       await query(
-        `UPDATE unix_store_inventory
+        `UPDATE store_inventory
          SET quantity_in_stock = quantity_in_stock + ?
          WHERE id = ?`,
         [delta, req.params.id]
@@ -424,7 +424,7 @@ router.patch('/:id/adjust', async (req, res) => {
         ? `Stock delivery — ${reason.trim()}`
         : 'Stock delivery (auto-linked from inventory receive)';
       await query(
-        `INSERT INTO unix_supplier_ledger
+        `INSERT INTO store_supplier_ledger
            (id, supplier_id, transaction_type, amount, description, transaction_date)
          VALUES (?, ?, 'PURCHASE', ?, ?, CURDATE())`,
         [uuidv4(), supplier_id, Number(total_cost), desc]
@@ -440,7 +440,7 @@ router.patch('/:id/adjust', async (req, res) => {
       try {
         // Fetch the item name for the advisory message
         const itemMeta = await query(
-          'SELECT name FROM unix_store_inventory WHERE id = ?',
+          'SELECT name FROM store_inventory WHERE id = ?',
           [req.params.id]
         );
         const itemName = itemMeta.length ? itemMeta[0].name : 'this item';
@@ -454,7 +454,7 @@ router.patch('/:id/adjust', async (req, res) => {
              p.id            AS product_id,
              p.name          AS product_name,
              p.pricesell     AS sell_price
-           FROM unix_yield_config yc
+           FROM store_yield_config yc
            LEFT JOIN products p ON yc.unicenta_product_id = p.id
            WHERE yc.inventory_item_id = ?
              AND yc.portions_per_unit > 0`,
@@ -507,7 +507,7 @@ router.post('/waste', async (req, res) => {
   try {
     // Fetch item for UOM
     const items = await query(
-      'SELECT id, name, unit_of_measure, quantity_in_stock FROM unix_store_inventory WHERE id = ?',
+      'SELECT id, name, unit_of_measure, quantity_in_stock FROM store_inventory WHERE id = ?',
       [inventory_item_id]
     );
     if (!items.length) return res.status(404).json({ error: 'Inventory item not found' });
@@ -519,7 +519,7 @@ router.post('/waste', async (req, res) => {
 
     // Insert as an Issued requisition with purpose=Wastage
     await query(
-      `INSERT INTO unix_requisitions
+      `INSERT INTO store_requisitions
          (id, inventory_item_id, quantity, unit_of_measure, requested_by, purpose, status,
           notes, requester_location, issued_at, issued_by)
        VALUES (?, ?, ?, ?, ?, 'Wastage', 'Issued', ?, ?, ?, ?)`,
@@ -529,7 +529,7 @@ router.post('/waste', async (req, res) => {
 
     // Deduct stock immediately
     await query(
-      'UPDATE unix_store_inventory SET quantity_in_stock = quantity_in_stock - ? WHERE id = ?',
+      'UPDATE store_inventory SET quantity_in_stock = quantity_in_stock - ? WHERE id = ?',
       [quantity, inventory_item_id]
     );
 
@@ -543,7 +543,7 @@ router.post('/waste', async (req, res) => {
 // DELETE /api/inventory/:id
 router.delete('/:id', async (req, res) => {
   try {
-    await query('DELETE FROM unix_store_inventory WHERE id = ?', [req.params.id]);
+    await query('DELETE FROM store_inventory WHERE id = ?', [req.params.id]);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

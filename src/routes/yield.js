@@ -14,8 +14,8 @@ router.get('/', async (req, res) => {
         i.unit_of_measure,
         p.name AS pos_product_name,
         p.pricesell AS pos_product_price
-      FROM unix_yield_config y
-      JOIN unix_store_inventory i ON i.id = y.inventory_item_id
+      FROM store_yield_config y
+      JOIN store_inventory i ON i.id = y.inventory_item_id
       LEFT JOIN products p ON p.id = y.unicenta_product_id
       ORDER BY i.name
     `);
@@ -31,8 +31,8 @@ router.get('/:id', async (req, res) => {
   try {
     const rows = await query(
       `SELECT y.*, i.name AS inventory_item_name, p.name AS pos_product_name
-       FROM unix_yield_config y
-       JOIN unix_store_inventory i ON i.id = y.inventory_item_id
+       FROM store_yield_config y
+       JOIN store_inventory i ON i.id = y.inventory_item_id
        LEFT JOIN products p ON p.id = y.unicenta_product_id
        WHERE y.id = ?`,
       [req.params.id]
@@ -53,7 +53,7 @@ router.post('/', async (req, res) => {
   const id = uuidv4();
   try {
     await query(
-      `INSERT INTO unix_yield_config (id, inventory_item_id, unicenta_product_id, portions_per_unit, notes)
+      `INSERT INTO store_yield_config (id, inventory_item_id, unicenta_product_id, portions_per_unit, notes)
        VALUES (?, ?, ?, ?, ?)`,
       [id, inventory_item_id, unicenta_product_id, portions_per_unit, notes || null]
     );
@@ -71,7 +71,7 @@ router.put('/:id', async (req, res) => {
   const { portions_per_unit, notes } = req.body;
   try {
     await query(
-      'UPDATE unix_yield_config SET portions_per_unit=?, notes=? WHERE id=?',
+      'UPDATE store_yield_config SET portions_per_unit=?, notes=? WHERE id=?',
       [portions_per_unit, notes || null, req.params.id]
     );
     res.json({ ok: true });
@@ -83,7 +83,7 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/yield/:id
 router.delete('/:id', async (req, res) => {
   try {
-    await query('DELETE FROM unix_yield_config WHERE id = ?', [req.params.id]);
+    await query('DELETE FROM store_yield_config WHERE id = ?', [req.params.id]);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

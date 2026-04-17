@@ -12,7 +12,7 @@ USE unicentapos;
 --    payment_day: e.g. 'Monday' – day of week the owner pays
 --    lead_time_days: how many days ahead to reorder
 -- ─────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS unix_suppliers (
+CREATE TABLE IF NOT EXISTS store_suppliers (
   id              VARCHAR(36)   NOT NULL,
   name            VARCHAR(255)  NOT NULL,
   phone           VARCHAR(30)   NULL,
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS unix_suppliers (
 --    These are NOT the same as uniCenta products (which are menu items).
 --    reorder_level: when stock drops to this level, raise a reorder alert.
 -- ─────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS unix_store_inventory (
+CREATE TABLE IF NOT EXISTS store_inventory (
   id                VARCHAR(36)   NOT NULL,
   name              VARCHAR(255)  NOT NULL,
   category          VARCHAR(100)  NULL,
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS unix_store_inventory (
   updated_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   CONSTRAINT fk_inventory_supplier
-    FOREIGN KEY (supplier_id) REFERENCES unix_suppliers(id)
+    FOREIGN KEY (supplier_id) REFERENCES store_suppliers(id)
     ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS unix_store_inventory (
 --    PURCHASE = increases debt (we owe them money).
 --    PAYMENT  = decreases debt (we paid them).
 -- ─────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS unix_supplier_ledger (
+CREATE TABLE IF NOT EXISTS store_supplier_ledger (
   id                VARCHAR(36)   NOT NULL,
   supplier_id       VARCHAR(36)   NOT NULL,
   transaction_type  ENUM('PURCHASE','PAYMENT') NOT NULL,
@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS unix_supplier_ledger (
   created_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   CONSTRAINT fk_ledger_supplier
-    FOREIGN KEY (supplier_id) REFERENCES unix_suppliers(id)
+    FOREIGN KEY (supplier_id) REFERENCES store_suppliers(id)
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS unix_supplier_ledger (
 --    purpose distinguishes 'Sales' stock from 'Staff Meal' costs.
 --    This is the critical column for the Usage Variance engine.
 -- ─────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS unix_requisitions (
+CREATE TABLE IF NOT EXISTS store_requisitions (
   id                VARCHAR(36)   NOT NULL,
   inventory_item_id VARCHAR(36)   NOT NULL,
   quantity          DECIMAL(12,3) NOT NULL,
@@ -90,18 +90,18 @@ CREATE TABLE IF NOT EXISTS unix_requisitions (
   issued_by         VARCHAR(100)  NULL,
   PRIMARY KEY (id),
   CONSTRAINT fk_req_inventory
-    FOREIGN KEY (inventory_item_id) REFERENCES unix_store_inventory(id)
+    FOREIGN KEY (inventory_item_id) REFERENCES store_inventory(id)
     ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ─────────────────────────────────────────────────────────────
 -- 5. YIELD CONFIG
 --    Maps a bulk store item to a uniCenta POS product with a portion factor.
---    Example: 1 Whole Chicken (unix_store_inventory) → 8 × "Chicken Portion" (products.id)
+--    Example: 1 Whole Chicken (store_inventory) → 8 × "Chicken Portion" (products.id)
 --    This powers the "Usage Variance" engine: Sales × (1/portions_per_unit)
 --    = expected store consumption vs actual store issues.
 -- ─────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS unix_yield_config (
+CREATE TABLE IF NOT EXISTS store_yield_config (
   id                   VARCHAR(36)   NOT NULL,
   inventory_item_id    VARCHAR(36)   NOT NULL,
   unicenta_product_id  VARCHAR(255)  NOT NULL,
@@ -112,6 +112,6 @@ CREATE TABLE IF NOT EXISTS unix_yield_config (
   PRIMARY KEY (id),
   UNIQUE KEY uq_yield (inventory_item_id, unicenta_product_id),
   CONSTRAINT fk_yield_inventory
-    FOREIGN KEY (inventory_item_id) REFERENCES unix_store_inventory(id)
+    FOREIGN KEY (inventory_item_id) REFERENCES store_inventory(id)
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

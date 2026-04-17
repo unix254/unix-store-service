@@ -7,7 +7,7 @@ const { query } = require('../db');
 router.get('/', async (req, res) => {
   try {
     const rows = await query(
-      'SELECT feature_key, enabled, label, description FROM unix_feature_flags ORDER BY feature_key'
+      'SELECT feature_key, enabled, label, description FROM yunix_feature_flags ORDER BY feature_key'
     );
     res.json(rows);
   } catch (err) {
@@ -26,7 +26,7 @@ router.put('/:key', async (req, res) => {
   }
   try {
     const result = await query(
-      'UPDATE unix_feature_flags SET enabled = ? WHERE feature_key = ?',
+      'UPDATE yunix_feature_flags SET enabled = ? WHERE feature_key = ?',
       [enabled ? 1 : 0, key]
     );
     if (result.affectedRows === 0) {

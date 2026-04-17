@@ -18,16 +18,16 @@ const router = express.Router();
 
 async function recalcTotals(payRunId) {
   await query(`
-    UPDATE unix_pay_runs pr
+    UPDATE store_pay_runs pr
     SET
       total_requested = (
         SELECT COALESCE(SUM(d.requested_amount), 0)
-        FROM unix_pay_run_details d
+        FROM store_pay_run_details d
         WHERE d.pay_run_id = pr.id AND d.status = 'Included'
       ),
       total_approved = (
         SELECT COALESCE(SUM(d.approved_amount), 0)
-        FROM unix_pay_run_details d
+        FROM store_pay_run_details d
         WHERE d.pay_run_id = pr.id AND d.status = 'Included'
       )
     WHERE pr.id = ?
@@ -44,8 +44,8 @@ router.get('/', async (req, res) => {
              COUNT(d.id)                          AS supplier_count,
              SUM(d.status = 'Included')           AS included_count,
              SUM(d.status = 'Postponed')          AS postponed_count
-      FROM unix_pay_runs pr
-      LEFT JOIN unix_pay_run_details d ON d.pay_run_id = pr.id
+      FROM store_pay_runs pr
+      LEFT JOIN store_pay_run_details d ON d.pay_run_id = pr.id
       GROUP BY pr.id
       ORDER BY pr.run_date DESC, pr.created_at DESC
     `);
@@ -61,7 +61,7 @@ router.get('/today', async (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
   try {
     let rows = await query(
-      'SELECT * FROM unix_pay_runs WHERE run_date = ? AND status != "Disbursed" ORDER BY created_at DESC LIMIT 1',
+      'SELECT * FROM store_pay_runs WHERE run_date = ? AND status != "Disbursed" ORDER BY created_at DESC LIMIT 1',
       [today]
     );
     if (rows.length) return res.json(rows[0]);
@@ -70,11 +70,11 @@ router.get('/today', async (req, res) => {
     const id = uuidv4();
     const token = uuidv4();
     await query(
-      `INSERT INTO unix_pay_runs (id, run_date, status, approval_token, total_requested, total_approved)
+      `INSERT INTO store_pay_runs (id, run_date, status, approval_token, total_requested, total_approved)
        VALUES (?, ?, 'Draft', ?, 0, 0)`,
       [id, today, token]
     );
-    rows = await query('SELECT * FROM unix_pay_runs WHERE id = ?', [id]);
+    rows = await query('SELECT * FROM store_pay_runs WHERE id = ?', [id]);
     res.json(rows[0]);
   } catch (err) {
     console.error(err);
@@ -85,13 +85,13 @@ router.get('/today', async (req, res) => {
 // GET /api/pay-runs/:id  – get a pay run with full detail rows + supplier info
 router.get('/:id', async (req, res) => {
   try {
-    const runs = await query('SELECT * FROM unix_pay_runs WHERE id = ?', [req.params.id]);
+    const runs = await query('SELECT * FROM store_pay_runs WHERE id = ?', [req.params.id]);
     if (!runs.length) return res.status(404).json({ error: 'Pay run not found' });
 
     const details = await query(`
       SELECT d.*, s.name AS supplier_name, s.phone AS supplier_phone, s.payment_day
-      FROM unix_pay_run_details d
-      JOIN unix_suppliers s ON s.id = d.supplier_id
+      FROM store_pay_run_details d
+      JOIN store_suppliers s ON s.id = d.supplier_id
       WHERE d.pay_run_id = ?
       ORDER BY d.status, s.name
     `, [req.params.id]);
@@ -107,7 +107,7 @@ router.get('/:id', async (req, res) => {
 // Auto-adds all suppliers with outstanding debt to this run (skips already-added ones).
 router.post('/:id/auto-populate', async (req, res) => {
   try {
-    const run = await query('SELECT * FROM unix_pay_runs WHERE id = ?', [req.params.id]);
+    const run = await query('SELECT * FROM store_pay_runs WHERE id = ?', [req.params.id]);
     if (!run.length) return res.status(404).json({ error: 'Pay run not found' });
     if (run[0].status !== 'Draft') {
       return res.status(400).json({ error: 'Only Draft runs can be modified' });
@@ -120,10 +120,10 @@ router.post('/:id/auto-populate', async (req, res) => {
         COALESCE(SUM(CASE WHEN l.transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT') THEN l.amount ELSE 0 END), 0)
           - COALESCE(SUM(CASE WHEN l.transaction_type IN ('PAYMENT','CASH_IN') THEN l.amount ELSE 0 END), 0)
           AS balance_due
-      FROM unix_suppliers s
-      LEFT JOIN unix_supplier_ledger l ON l.supplier_id = s.id
+      FROM store_suppliers s
+      LEFT JOIN store_supplier_ledger l ON l.supplier_id = s.id
       WHERE s.id NOT IN (
-        SELECT supplier_id FROM unix_pay_run_details WHERE pay_run_id = ?
+        SELECT supplier_id FROM store_pay_run_details WHERE pay_run_id = ?
       )
       GROUP BY s.id
       HAVING balance_due > 0
@@ -131,7 +131,7 @@ router.post('/:id/auto-populate', async (req, res) => {
 
     for (const d of debtors) {
       await query(
-        `INSERT INTO unix_pay_run_details (id, pay_run_id, supplier_id, requested_amount, approved_amount, status)
+        `INSERT INTO store_pay_run_details (id, pay_run_id, supplier_id, requested_amount, approved_amount, status)
          VALUES (?, ?, ?, ?, ?, 'Included')`,
         [uuidv4(), req.params.id, d.id, d.balance_due, d.balance_due]
       );
@@ -151,7 +151,7 @@ router.post('/:id/details', async (req, res) => {
     return res.status(400).json({ error: 'supplier_id and requested_amount are required' });
   }
   try {
-    const run = await query('SELECT status FROM unix_pay_runs WHERE id = ?', [req.params.id]);
+    const run = await query('SELECT status FROM store_pay_runs WHERE id = ?', [req.params.id]);
     if (!run.length) return res.status(404).json({ error: 'Pay run not found' });
     if (run[0].status !== 'Draft') {
       return res.status(400).json({ error: 'Only Draft runs can be modified' });
@@ -160,7 +160,7 @@ router.post('/:id/details', async (req, res) => {
     const id = uuidv4();
     const approved = approved_amount ?? requested_amount;
     await query(
-      `INSERT INTO unix_pay_run_details (id, pay_run_id, supplier_id, requested_amount, approved_amount, notes, status)
+      `INSERT INTO store_pay_run_details (id, pay_run_id, supplier_id, requested_amount, approved_amount, notes, status)
        VALUES (?, ?, ?, ?, ?, ?, 'Included')`,
       [id, req.params.id, supplier_id, requested_amount, approved, notes || null]
     );
@@ -178,14 +178,14 @@ router.post('/:id/details', async (req, res) => {
 router.put('/:id/details/:detailId', async (req, res) => {
   const { approved_amount, status, notes } = req.body;
   try {
-    const run = await query('SELECT status FROM unix_pay_runs WHERE id = ?', [req.params.id]);
+    const run = await query('SELECT status FROM store_pay_runs WHERE id = ?', [req.params.id]);
     if (!run.length) return res.status(404).json({ error: 'Pay run not found' });
     if (run[0].status === 'Disbursed') {
       return res.status(400).json({ error: 'Disbursed runs cannot be modified' });
     }
 
     await query(
-      `UPDATE unix_pay_run_details
+      `UPDATE store_pay_run_details
        SET approved_amount = COALESCE(?, approved_amount),
            status = COALESCE(?, status),
            notes  = COALESCE(?, notes)
@@ -203,7 +203,7 @@ router.put('/:id/details/:detailId', async (req, res) => {
 router.delete('/:id/details/:detailId', async (req, res) => {
   try {
     await query(
-      'DELETE FROM unix_pay_run_details WHERE id = ? AND pay_run_id = ?',
+      'DELETE FROM store_pay_run_details WHERE id = ? AND pay_run_id = ?',
       [req.params.detailId, req.params.id]
     );
     await recalcTotals(req.params.id);
@@ -218,7 +218,7 @@ router.patch('/:id/submit', async (req, res) => {
   const { created_by } = req.body;
   try {
     await query(
-      `UPDATE unix_pay_runs SET status = 'Submitted', created_by = COALESCE(?, created_by)
+      `UPDATE store_pay_runs SET status = 'Submitted', created_by = COALESCE(?, created_by)
        WHERE id = ? AND status = 'Draft'`,
       [created_by || null, req.params.id]
     );
@@ -232,7 +232,7 @@ router.patch('/:id/submit', async (req, res) => {
 router.patch('/:id/approve', async (req, res) => {
   try {
     await query(
-      `UPDATE unix_pay_runs SET status = 'Approved' WHERE id = ? AND status = 'Submitted'`,
+      `UPDATE store_pay_runs SET status = 'Approved' WHERE id = ? AND status = 'Submitted'`,
       [req.params.id]
     );
     res.json({ ok: true });
@@ -248,7 +248,7 @@ router.patch('/:id/approve', async (req, res) => {
 router.patch('/:id/finalize', async (req, res) => {
   try {
     const result = await query(
-      `UPDATE unix_pay_runs SET status = 'Approved' WHERE id = ? AND status = 'Draft'`,
+      `UPDATE store_pay_runs SET status = 'Approved' WHERE id = ? AND status = 'Draft'`,
       [req.params.id]
     );
     if (result.affectedRows === 0) {
@@ -274,7 +274,7 @@ router.patch('/:id/finalize', async (req, res) => {
 router.patch('/:id/details/:detailId/disburse', async (req, res) => {
   const { disbursed_by, payment_source_supplier_id, payment_reference } = req.body;
   try {
-    const run = await query('SELECT * FROM unix_pay_runs WHERE id = ?', [req.params.id]);
+    const run = await query('SELECT * FROM store_pay_runs WHERE id = ?', [req.params.id]);
     if (!run.length) return res.status(404).json({ error: 'Pay run not found' });
     if (run[0].status !== 'Approved') {
       return res.status(400).json({ error: 'Only Approved runs can be disbursed' });
@@ -282,8 +282,8 @@ router.patch('/:id/details/:detailId/disburse', async (req, res) => {
 
     const details = await query(
       `SELECT d.*, s.name AS supplier_name, s.id AS supplier_id_ref
-       FROM unix_pay_run_details d
-       JOIN unix_suppliers s ON s.id = d.supplier_id
+       FROM store_pay_run_details d
+       JOIN store_suppliers s ON s.id = d.supplier_id
        WHERE d.id = ? AND d.pay_run_id = ?`,
       [req.params.detailId, req.params.id]
     );
@@ -295,7 +295,7 @@ router.patch('/:id/details/:detailId/disburse', async (req, res) => {
     // Validate payment source is an internal supplier if provided
     if (payment_source_supplier_id) {
       const src = await query(
-        'SELECT id, name, is_internal FROM unix_suppliers WHERE id = ?',
+        'SELECT id, name, is_internal FROM store_suppliers WHERE id = ?',
         [payment_source_supplier_id]
       );
       if (!src.length) return res.status(400).json({ error: 'Payment source supplier not found' });
@@ -304,7 +304,7 @@ router.patch('/:id/details/:detailId/disburse', async (req, res) => {
 
     // Load business name for description context
     const settingsRows = await query(
-      `SELECT setting_value FROM unix_settings WHERE setting_key = 'business_name' LIMIT 1`
+      `SELECT setting_value FROM yunix_settings WHERE setting_key = 'business_name' LIMIT 1`
     );
     const busName = settingsRows.length ? settingsRows[0].setting_value : 'Store';
 
@@ -314,7 +314,7 @@ router.patch('/:id/details/:detailId/disburse', async (req, res) => {
 
     // 1. PAYMENT on external supplier ledger
     await query(
-      `INSERT INTO unix_supplier_ledger
+      `INSERT INTO store_supplier_ledger
          (id, supplier_id, transaction_type, amount, description, reference_doc, transaction_date)
        VALUES (?, ?, 'PAYMENT', ?, ?, ?, ?)`,
       [uuidv4(), d.supplier_id, d.approved_amount,
@@ -327,7 +327,7 @@ router.patch('/:id/details/:detailId/disburse', async (req, res) => {
     //    acted as a payment intermediary for a prequalified external supplier.
     if (payment_source_supplier_id) {
       await query(
-        `INSERT INTO unix_supplier_ledger
+        `INSERT INTO store_supplier_ledger
            (id, supplier_id, transaction_type, amount, description, reference_doc, transaction_date, related_supplier_id)
          VALUES (?, ?, 'SUPPLIER_PAYMENT', ?, ?, ?, ?, ?)`,
         [uuidv4(), payment_source_supplier_id, d.approved_amount,
@@ -339,7 +339,7 @@ router.patch('/:id/details/:detailId/disburse', async (req, res) => {
 
     // Mark detail as Paid
     await query(
-      `UPDATE unix_pay_run_details
+      `UPDATE store_pay_run_details
        SET status = 'Paid', disbursed_by = ?, disbursed_at = NOW(),
            payment_source_id = ?, payment_reference = ?
        WHERE id = ?`,
@@ -349,12 +349,12 @@ router.patch('/:id/details/:detailId/disburse', async (req, res) => {
 
     // Auto-close run if all Included rows are now Paid
     const remaining = await query(
-      `SELECT COUNT(*) AS cnt FROM unix_pay_run_details
+      `SELECT COUNT(*) AS cnt FROM store_pay_run_details
        WHERE pay_run_id = ? AND status = 'Included'`,
       [req.params.id]
     );
     if (Number(remaining[0].cnt) === 0) {
-      await query(`UPDATE unix_pay_runs SET status = 'Disbursed' WHERE id = ?`, [req.params.id]);
+      await query(`UPDATE store_pay_runs SET status = 'Disbursed' WHERE id = ?`, [req.params.id]);
     }
     await recalcTotals(req.params.id);
 
@@ -369,21 +369,21 @@ router.patch('/:id/details/:detailId/disburse', async (req, res) => {
 // Generates a WhatsApp deep-link message for the Owner to review and approve the pay run.
 router.get('/:id/whatsapp', async (req, res) => {
   try {
-    const runs = await query('SELECT * FROM unix_pay_runs WHERE id = ?', [req.params.id]);
+    const runs = await query('SELECT * FROM store_pay_runs WHERE id = ?', [req.params.id]);
     if (!runs.length) return res.status(404).json({ error: 'Pay run not found' });
     const run = runs[0];
 
     const details = await query(`
       SELECT d.approved_amount, s.name AS supplier_name
-      FROM unix_pay_run_details d
-      JOIN unix_suppliers s ON s.id = d.supplier_id
+      FROM store_pay_run_details d
+      JOIN store_suppliers s ON s.id = d.supplier_id
       WHERE d.pay_run_id = ? AND d.status = 'Included'
       ORDER BY s.name
     `, [req.params.id]);
 
     // Load business settings (name, slogan, owner contact)
     const settingsRows = await query(
-      `SELECT setting_key, setting_value FROM unix_settings
+      `SELECT setting_key, setting_value FROM yunix_settings
        WHERE setting_key IN ('business_name', 'slogan', 'owner_name', 'owner_phone')`
     );
     const settingsMap = {};

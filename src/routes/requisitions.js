@@ -9,8 +9,8 @@ router.get('/', async (req, res) => {
   const { status, purpose } = req.query;
   let sql = `
     SELECT r.*, i.name AS item_name, i.unit_of_measure AS item_uom
-    FROM unix_requisitions r
-    LEFT JOIN unix_store_inventory i ON i.id = r.inventory_item_id
+    FROM store_requisitions r
+    LEFT JOIN store_inventory i ON i.id = r.inventory_item_id
     WHERE 1=1
   `;
   const params = [];
@@ -32,8 +32,8 @@ router.get('/pending', async (req, res) => {
   try {
     const rows = await query(`
       SELECT r.*, i.name AS item_name, i.unit_of_measure AS item_uom
-      FROM unix_requisitions r
-      LEFT JOIN unix_store_inventory i ON i.id = r.inventory_item_id
+      FROM store_requisitions r
+      LEFT JOIN store_inventory i ON i.id = r.inventory_item_id
       WHERE r.status = 'Pending'
       ORDER BY r.requested_at ASC
     `);
@@ -48,8 +48,8 @@ router.get('/:id', async (req, res) => {
   try {
     const rows = await query(
       `SELECT r.*, i.name AS item_name, i.unit_of_measure AS item_uom
-       FROM unix_requisitions r
-       LEFT JOIN unix_store_inventory i ON i.id = r.inventory_item_id
+       FROM store_requisitions r
+       LEFT JOIN store_inventory i ON i.id = r.inventory_item_id
        WHERE r.id = ?`,
       [req.params.id]
     );
@@ -90,7 +90,7 @@ router.post('/', async (req, res) => {
   const id = uuidv4();
   try {
     await query(
-      `INSERT INTO unix_requisitions
+      `INSERT INTO store_requisitions
          (id, inventory_item_id, quantity, unit_of_measure, requested_by, purpose, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [id, isNewItem ? null : inventory_item_id, quantity, resolvedUom,
@@ -117,7 +117,7 @@ router.patch('/:id/issue', async (req, res) => {
     await conn.beginTransaction();
 
     const [[req_row]] = await conn.execute(
-      'SELECT * FROM unix_requisitions WHERE id = ? FOR UPDATE',
+      'SELECT * FROM store_requisitions WHERE id = ? FOR UPDATE',
       [req.params.id]
     );
     if (!req_row) {
@@ -144,7 +144,7 @@ router.patch('/:id/issue', async (req, res) => {
     if (req_row.inventory_item_id !== null) {
       // Check available stock
       const [[item]] = await conn.execute(
-        'SELECT quantity_in_stock FROM unix_store_inventory WHERE id = ?',
+        'SELECT quantity_in_stock FROM store_inventory WHERE id = ?',
         [req_row.inventory_item_id]
       );
       if (Number(item.quantity_in_stock) < qtyToIssue) {
@@ -158,14 +158,14 @@ router.patch('/:id/issue', async (req, res) => {
 
       // Deduct stock
       await conn.execute(
-        'UPDATE unix_store_inventory SET quantity_in_stock = quantity_in_stock - ? WHERE id = ?',
+        'UPDATE store_inventory SET quantity_in_stock = quantity_in_stock - ? WHERE id = ?',
         [qtyToIssue, req_row.inventory_item_id]
       );
     }
 
     // Mark requisition as Issued, saving the actual issued quantity and any notes
     await conn.execute(
-      `UPDATE unix_requisitions
+      `UPDATE store_requisitions
          SET status='Issued', issued_by=?, issued_at=NOW(),
              issued_quantity=?, issue_notes=?
        WHERE id=?`,
@@ -189,7 +189,7 @@ router.patch('/:id/reject', async (req, res) => {
   const { reject_reason } = req.body;
   try {
     await query(
-      `UPDATE unix_requisitions SET status='Rejected', issue_notes=?
+      `UPDATE store_requisitions SET status='Rejected', issue_notes=?
        WHERE id=? AND status='Pending'`,
       [reject_reason || null, req.params.id]
     );

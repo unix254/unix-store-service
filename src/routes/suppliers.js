@@ -16,8 +16,8 @@ router.get('/', async (req, res) => {
         COALESCE(SUM(CASE WHEN l.transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT','OTHER_EXPENSE') THEN l.amount ELSE 0 END), 0)
           - COALESCE(SUM(CASE WHEN l.transaction_type IN ('PAYMENT','CASH_IN') THEN l.amount ELSE 0 END), 0)
           AS balance_due
-      FROM unix_suppliers s
-      LEFT JOIN unix_supplier_ledger l ON l.supplier_id = s.id
+      FROM store_suppliers s
+      LEFT JOIN store_supplier_ledger l ON l.supplier_id = s.id
       GROUP BY s.id
       ORDER BY s.name
     `);
@@ -31,7 +31,7 @@ router.get('/', async (req, res) => {
 // GET /api/suppliers/:id
 router.get('/:id', async (req, res) => {
   try {
-    const rows = await query('SELECT * FROM unix_suppliers WHERE id = ?', [req.params.id]);
+    const rows = await query('SELECT * FROM store_suppliers WHERE id = ?', [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Supplier not found' });
     res.json(rows[0]);
   } catch (err) {
@@ -46,7 +46,7 @@ router.post('/', async (req, res) => {
   const id = uuidv4();
   try {
     await query(
-      `INSERT INTO unix_suppliers (id, name, phone, location, payment_day, lead_time_days, notes, is_internal)
+      `INSERT INTO store_suppliers (id, name, phone, location, payment_day, lead_time_days, notes, is_internal)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, name, phone || null, location || null, payment_day || null, lead_time_days || 1,
        notes || null, is_internal ? 1 : 0]
@@ -62,7 +62,7 @@ router.put('/:id', async (req, res) => {
   const { name, phone, location, payment_day, lead_time_days, notes, is_internal } = req.body;
   try {
     await query(
-      `UPDATE unix_suppliers SET name=?, phone=?, location=?, payment_day=?, lead_time_days=?, notes=?, is_internal=?
+      `UPDATE store_suppliers SET name=?, phone=?, location=?, payment_day=?, lead_time_days=?, notes=?, is_internal=?
        WHERE id=?`,
       [name, phone || null, location || null, payment_day || null, lead_time_days || 1,
        notes || null, is_internal ? 1 : 0, req.params.id]
@@ -76,7 +76,7 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/suppliers/:id
 router.delete('/:id', async (req, res) => {
   try {
-    await query('DELETE FROM unix_suppliers WHERE id = ?', [req.params.id]);
+    await query('DELETE FROM store_suppliers WHERE id = ?', [req.params.id]);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -92,8 +92,8 @@ router.get('/:id/ledger', async (req, res) => {
     const entries = await query(
       `SELECT l.*,
               rs.name AS related_supplier_name
-       FROM unix_supplier_ledger l
-       LEFT JOIN unix_suppliers rs ON rs.id = l.related_supplier_id
+       FROM store_supplier_ledger l
+       LEFT JOIN store_suppliers rs ON rs.id = l.related_supplier_id
        WHERE l.supplier_id = ?
        ORDER BY l.transaction_date, l.created_at`,
       [req.params.id]
@@ -126,7 +126,7 @@ router.post('/:id/ledger', async (req, res) => {
   const id = uuidv4();
   try {
     await query(
-      `INSERT INTO unix_supplier_ledger (id, supplier_id, transaction_type, amount, description, reference_doc, transaction_date)
+      `INSERT INTO store_supplier_ledger (id, supplier_id, transaction_type, amount, description, reference_doc, transaction_date)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [id, req.params.id, transaction_type, amount, description || null, reference_doc || null, transaction_date]
     );
@@ -144,7 +144,7 @@ router.post('/:id/ledger', async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 router.get('/:id/statement', async (req, res) => {
   try {
-    const supplier = await query('SELECT * FROM unix_suppliers WHERE id = ?', [req.params.id]);
+    const supplier = await query('SELECT * FROM store_suppliers WHERE id = ?', [req.params.id]);
     if (!supplier.length) return res.status(404).json({ error: 'Supplier not found' });
     const s = supplier[0];
 
@@ -161,7 +161,7 @@ router.get('/:id/statement', async (req, res) => {
          COALESCE(SUM(CASE WHEN transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT','OTHER_EXPENSE') THEN amount ELSE 0 END), 0)
            - COALESCE(SUM(CASE WHEN transaction_type IN ('PAYMENT','CASH_IN') THEN amount ELSE 0 END), 0)
            AS opening_balance
-       FROM unix_supplier_ledger
+       FROM store_supplier_ledger
        WHERE supplier_id = ? AND transaction_date < ?`,
       [req.params.id, periodStartStr]
     );
@@ -170,8 +170,8 @@ router.get('/:id/statement', async (req, res) => {
     // Period entries
     const periodRows = await query(
       `SELECT l.*, rs.name AS related_supplier_name
-       FROM unix_supplier_ledger l
-       LEFT JOIN unix_suppliers rs ON rs.id = l.related_supplier_id
+       FROM store_supplier_ledger l
+       LEFT JOIN store_suppliers rs ON rs.id = l.related_supplier_id
        WHERE l.supplier_id = ?
          AND l.transaction_date >= ? AND l.transaction_date <= ?
        ORDER BY l.transaction_date, l.created_at`,
@@ -193,7 +193,7 @@ router.get('/:id/statement', async (req, res) => {
 
     // Load business name for message formatting
     const settingsRows = await query(
-      `SELECT setting_key, setting_value FROM unix_settings WHERE setting_key IN ('business_name','slogan')`
+      `SELECT setting_key, setting_value FROM yunix_settings WHERE setting_key IN ('business_name','slogan')`
     );
     const sm = {};
     settingsRows.forEach(r => sm[r.setting_key] = r.setting_value);
@@ -227,7 +227,7 @@ router.get('/:id/statement/whatsapp', async (req, res) => {
   try {
     const days = parseInt(req.query.days, 10) || 30;
     // Reuse the statement logic by fetching from same DB
-    const supplier = await query('SELECT * FROM unix_suppliers WHERE id = ?', [req.params.id]);
+    const supplier = await query('SELECT * FROM store_suppliers WHERE id = ?', [req.params.id]);
     if (!supplier.length) return res.status(404).json({ error: 'Supplier not found' });
     const s = supplier[0];
 
@@ -242,14 +242,14 @@ router.get('/:id/statement/whatsapp', async (req, res) => {
          COALESCE(SUM(CASE WHEN transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT','OTHER_EXPENSE') THEN amount ELSE 0 END), 0)
            - COALESCE(SUM(CASE WHEN transaction_type IN ('PAYMENT','CASH_IN') THEN amount ELSE 0 END), 0)
            AS opening_balance
-       FROM unix_supplier_ledger
+       FROM store_supplier_ledger
        WHERE supplier_id = ? AND transaction_date < ?`,
       [req.params.id, periodStartStr]
     );
     const openingBalance = Number(openRows[0].opening_balance);
 
     const periodRows = await query(
-      `SELECT transaction_type, amount FROM unix_supplier_ledger
+      `SELECT transaction_type, amount FROM store_supplier_ledger
        WHERE supplier_id = ? AND transaction_date >= ? AND transaction_date <= ?`,
       [req.params.id, periodStartStr, todayStr]
     );
@@ -265,7 +265,7 @@ router.get('/:id/statement/whatsapp', async (req, res) => {
     const closingBalance = openingBalance + purchases + supplierPayments + otherExpenses - payments - cashIns;
 
     const settingsRows = await query(
-      `SELECT setting_key, setting_value FROM unix_settings WHERE setting_key IN ('business_name','slogan')`
+      `SELECT setting_key, setting_value FROM yunix_settings WHERE setting_key IN ('business_name','slogan')`
     );
     const sm = {};
     settingsRows.forEach(r => sm[r.setting_key] = r.setting_value);
@@ -356,8 +356,8 @@ router.get('/alerts/upcoming-debt', async (req, res) => {
         COALESCE(SUM(CASE WHEN l.transaction_type IN ('PURCHASE','SUPPLIER_PAYMENT','OTHER_EXPENSE') THEN l.amount ELSE 0 END), 0)
           - COALESCE(SUM(CASE WHEN l.transaction_type IN ('PAYMENT','CASH_IN') THEN l.amount ELSE 0 END), 0)
           AS balance_due
-      FROM unix_suppliers s
-      LEFT JOIN unix_supplier_ledger l ON l.supplier_id = s.id
+      FROM store_suppliers s
+      LEFT JOIN store_supplier_ledger l ON l.supplier_id = s.id
       GROUP BY s.id
       HAVING balance_due > 0
       ORDER BY balance_due DESC
@@ -380,7 +380,7 @@ router.post('/:id/order', async (req, res) => {
     return res.status(400).json({ error: 'items array is required' });
   }
   try {
-    const rows = await query('SELECT * FROM unix_suppliers WHERE id = ?', [req.params.id]);
+    const rows = await query('SELECT * FROM store_suppliers WHERE id = ?', [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Supplier not found' });
     const supplier = rows[0];
 
@@ -396,7 +396,7 @@ router.post('/:id/order', async (req, res) => {
       .map(it => `  ${emojiDiamond} ${it.quantity} ${it.unit} – ${it.name}`)
       .join('\r\n');
 
-    const settingsRows = await query(`SELECT setting_key, setting_value FROM unix_settings WHERE setting_key IN ('business_name', 'slogan')`);
+    const settingsRows = await query(`SELECT setting_key, setting_value FROM yunix_settings WHERE setting_key IN ('business_name', 'slogan')`);
     const settingsMap = {};
     settingsRows.forEach(r => settingsMap[r.setting_key] = r.setting_value);
     const busName = settingsMap['business_name'] || 'Yunix Store';

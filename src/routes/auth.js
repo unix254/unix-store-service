@@ -13,7 +13,7 @@ router.post('/pin', async (req, res) => {
   }
   try {
     const rows = await query(
-      'SELECT id, name, role, capabilities, location_name FROM unix_staff WHERE pin = ? AND active = 1',
+      'SELECT id, name, role, capabilities, location_name FROM yunix_staff WHERE pin = ? AND active = 1',
       [pin]
     );
     if (!rows.length) {
@@ -36,7 +36,7 @@ router.post('/pin', async (req, res) => {
 router.get('/staff', async (req, res) => {
   try {
     const rows = await query(
-      'SELECT id, name, role, active, capabilities, location_name, created_at FROM unix_staff ORDER BY role, name'
+      'SELECT id, name, role, active, capabilities, location_name, created_at FROM yunix_staff ORDER BY role, name'
     );
     // Parse JSON capabilities for each row
     rows.forEach(r => {
@@ -65,14 +65,14 @@ router.post('/staff', async (req, res) => {
   }
   try {
     const { v4: uuidv4 } = require('uuid');
-    const existing = await query('SELECT id FROM unix_staff WHERE pin = ?', [pin]);
+    const existing = await query('SELECT id FROM yunix_staff WHERE pin = ?', [pin]);
     if (existing.length) {
       return res.status(409).json({ error: 'That PIN is already in use by another staff member' });
     }
     const id = uuidv4();
     const caps = capabilities ? JSON.stringify(capabilities) : null;
     await query(
-      'INSERT INTO unix_staff (id, name, pin, role, active, capabilities, location_name) VALUES (?, ?, ?, ?, 1, ?, ?)',
+      'INSERT INTO yunix_staff (id, name, pin, role, active, capabilities, location_name) VALUES (?, ?, ?, ?, 1, ?, ?)',
       [id, name, pin, role, caps, location_name || null]
     );
     res.status(201).json({ id });
@@ -97,7 +97,7 @@ router.put('/staff/:id', async (req, res) => {
   try {
     if (pin) {
       const conflict = await query(
-        'SELECT id FROM unix_staff WHERE pin = ? AND id != ?',
+        'SELECT id FROM yunix_staff WHERE pin = ? AND id != ?',
         [pin, req.params.id]
       );
       if (conflict.length) {
@@ -107,12 +107,12 @@ router.put('/staff/:id', async (req, res) => {
     const caps = capabilities ? JSON.stringify(capabilities) : null;
     if (pin) {
       await query(
-        'UPDATE unix_staff SET name = ?, pin = ?, role = ?, capabilities = ?, location_name = ? WHERE id = ?',
+        'UPDATE yunix_staff SET name = ?, pin = ?, role = ?, capabilities = ?, location_name = ? WHERE id = ?',
         [name, pin, role, caps, location_name || null, req.params.id]
       );
     } else {
       await query(
-        'UPDATE unix_staff SET name = ?, role = ?, capabilities = ?, location_name = ? WHERE id = ?',
+        'UPDATE yunix_staff SET name = ?, role = ?, capabilities = ?, location_name = ? WHERE id = ?',
         [name, role, caps, location_name || null, req.params.id]
       );
     }
@@ -126,7 +126,7 @@ router.put('/staff/:id', async (req, res) => {
 // PATCH /api/auth/staff/:id/toggle  – toggle active/inactive
 router.patch('/staff/:id/toggle', async (req, res) => {
   try {
-    await query('UPDATE unix_staff SET active = NOT active WHERE id = ?', [req.params.id]);
+    await query('UPDATE yunix_staff SET active = NOT active WHERE id = ?', [req.params.id]);
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -137,7 +137,7 @@ router.patch('/staff/:id/toggle', async (req, res) => {
 // DELETE /api/auth/staff/:id  – permanently remove a staff member
 router.delete('/staff/:id', async (req, res) => {
   try {
-    await query('DELETE FROM unix_staff WHERE id = ?', [req.params.id]);
+    await query('DELETE FROM yunix_staff WHERE id = ?', [req.params.id]);
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
