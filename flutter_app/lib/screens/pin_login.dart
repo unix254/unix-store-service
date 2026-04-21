@@ -572,6 +572,7 @@ class _PinEntrySheetState extends State<_PinEntrySheet>
 
   late AnimationController _shakeCtrl;
   late Animation<double> _shakeAnim;
+  final _focusNode = FocusNode();
 
   @override
   void initState() {
@@ -585,12 +586,32 @@ class _PinEntrySheetState extends State<_PinEntrySheet>
       TweenSequenceItem(tween: Tween(begin: -8.0, end: 8.0),   weight: 2),
       TweenSequenceItem(tween: Tween(begin: 8.0, end: 0.0),    weight: 1),
     ]).animate(CurvedAnimation(parent: _shakeCtrl, curve: Curves.easeInOut));
+    
+    // Request focus for physical keyboard input
+    _focusNode.requestFocus();
   }
 
   @override
   void dispose() {
+    _focusNode.dispose();
     _shakeCtrl.dispose();
     super.dispose();
+  }
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.backspace || 
+          event.logicalKey == LogicalKeyboardKey.delete) {
+        _delete();
+        return KeyEventResult.handled;
+      }
+      final char = event.character;
+      if (char != null && RegExp(r'^[0-9]$').hasMatch(char)) {
+        _tap(char);
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
   }
 
   void _tap(String digit) {
@@ -636,11 +657,15 @@ class _PinEntrySheetState extends State<_PinEntrySheet>
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF152028),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+    return Focus(
+      focusNode: _focusNode,
+      onKeyEvent: _handleKeyEvent,
+      autofocus: true,
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF152028),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
       padding: EdgeInsets.only(
         left: 24,
         right: 24,
@@ -738,7 +763,7 @@ class _PinEntrySheetState extends State<_PinEntrySheet>
             _Numpad(onTap: _tap, onDelete: _delete),
         ],
       ),
-    );
+    ));
   }
 }
 
