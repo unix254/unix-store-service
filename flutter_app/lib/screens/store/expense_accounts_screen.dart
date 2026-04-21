@@ -371,102 +371,200 @@ class _AccountDetailState extends State<_AccountDetail> {
     final balance = a.balanceDue;
     final isNeg   = balance < 0;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // ── Header ─────────────────────────────────────────────
-        Container(
-          color: Colors.white,
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                // Float balance card
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(children: [
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 800;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Header ─────────────────────────────────────────────
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (isMobile) ...[
+                    // Float balance card
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         const Icon(Icons.account_circle_rounded,
                             size: 20, color: Color(0xFF1565C0)),
                         const SizedBox(width: 8),
-                        Text(a.name,
-                            style: const TextStyle(
-                                fontSize: 20, fontWeight: FontWeight.w800)),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1565C0).withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(4),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(a.name,
+                                  style: const TextStyle(
+                                      fontSize: 20, fontWeight: FontWeight.w800)),
+                              const SizedBox(height: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1565C0).withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text('FLOAT ACCOUNT',
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        color: Color(0xFF1565C0),
+                                        fontWeight: FontWeight.w700)),
+                              ),
+                              if (a.location != null) ...[
+                                const SizedBox(height: 4),
+                                Row(children: [
+                                  const Icon(Icons.location_on_rounded,
+                                      size: 13, color: AppTheme.pinMuted),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(a.location!,
+                                        style: const TextStyle(
+                                            color: AppTheme.pinMuted, fontSize: 12)),
+                                  ),
+                                ]),
+                              ],
+                            ],
                           ),
-                          child: const Text('FLOAT ACCOUNT',
+                        ),
+                      ]
+                    ),
+                    const SizedBox(height: 16),
+                    // Balance card
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: isNeg
+                            ? AppTheme.debtRed.withOpacity(0.08)
+                            : const Color(0xFFE8F5E9),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isNeg
+                              ? AppTheme.debtRed.withOpacity(0.3)
+                              : AppTheme.paidGreen.withOpacity(0.4),
+                        ),
+                      ),
+                      child: Column(children: [
+                        Text(
+                          'Float Balance',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: isNeg
+                                  ? AppTheme.debtRed
+                                  : AppTheme.paidGreen,
+                              fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _kes.format(balance.abs()),
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            color: isNeg ? AppTheme.debtRed : AppTheme.paidGreen,
+                          ),
+                        ),
+                        if (isNeg)
+                          const Text('OVERDRAWN',
                               style: TextStyle(
                                   fontSize: 10,
-                                  color: Color(0xFF1565C0),
+                                  color: AppTheme.debtRed,
                                   fontWeight: FontWeight.w700)),
-                        ),
                       ]),
-                      if (a.location != null) ...[
-                        const SizedBox(height: 4),
-                        Row(children: [
-                          const Icon(Icons.location_on_rounded,
-                              size: 13, color: AppTheme.pinMuted),
-                          const SizedBox(width: 4),
-                          Text(a.location!,
-                              style: const TextStyle(
-                                  color: AppTheme.pinMuted, fontSize: 12)),
-                        ]),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 16),
-                // Balance card
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 20, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: isNeg
-                        ? AppTheme.debtRed.withOpacity(0.08)
-                        : const Color(0xFFE8F5E9),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isNeg
-                          ? AppTheme.debtRed.withOpacity(0.3)
-                          : AppTheme.paidGreen.withOpacity(0.4),
                     ),
-                  ),
-                  child: Column(children: [
-                    Text(
-                      'Float Balance',
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: isNeg
-                              ? AppTheme.debtRed
-                              : AppTheme.paidGreen,
-                          fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _kes.format(balance.abs()),
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        color: isNeg ? AppTheme.debtRed : AppTheme.paidGreen,
+                  ] else ...[
+                    Row(children: [
+                      // Float balance card
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(children: [
+                              const Icon(Icons.account_circle_rounded,
+                                  size: 20, color: Color(0xFF1565C0)),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(a.name,
+                                    style: const TextStyle(
+                                        fontSize: 20, fontWeight: FontWeight.w800)),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1565C0).withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text('FLOAT ACCOUNT',
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        color: Color(0xFF1565C0),
+                                        fontWeight: FontWeight.w700)),
+                              ),
+                            ]),
+                            if (a.location != null) ...[
+                              const SizedBox(height: 4),
+                              Row(children: [
+                                const Icon(Icons.location_on_rounded,
+                                    size: 13, color: AppTheme.pinMuted),
+                                const SizedBox(width: 4),
+                                Text(a.location!,
+                                    style: const TextStyle(
+                                        color: AppTheme.pinMuted, fontSize: 12)),
+                              ]),
+                            ],
+                          ],
+                        ),
                       ),
-                    ),
-                    if (isNeg)
-                      const Text('OVERDRAWN',
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: AppTheme.debtRed,
-                              fontWeight: FontWeight.w700)),
-                  ]),
-                ),
-              ]),
+                      const SizedBox(width: 16),
+                      // Balance card
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: isNeg
+                              ? AppTheme.debtRed.withOpacity(0.08)
+                              : const Color(0xFFE8F5E9),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isNeg
+                                ? AppTheme.debtRed.withOpacity(0.3)
+                                : AppTheme.paidGreen.withOpacity(0.4),
+                          ),
+                        ),
+                        child: Column(children: [
+                          Text(
+                            'Float Balance',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: isNeg
+                                    ? AppTheme.debtRed
+                                    : AppTheme.paidGreen,
+                                fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _kes.format(balance.abs()),
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              color: isNeg ? AppTheme.debtRed : AppTheme.paidGreen,
+                            ),
+                          ),
+                          if (isNeg)
+                            const Text('OVERDRAWN',
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    color: AppTheme.debtRed,
+                                    fontWeight: FontWeight.w700)),
+                        ]),
+                      ),
+                    ]),
+                  ],
               const SizedBox(height: 16),
 
               // ── Action buttons ────────────────────────────────
@@ -505,7 +603,9 @@ class _AccountDetailState extends State<_AccountDetail> {
 
         // ── Ledger entries ──────────────────────────────────────
         _LedgerSection(entries: _entries, loading: _loadingLedger),
-      ],
+          ],
+        );
+      },
     );
   }
 }

@@ -1,1 +1,0 @@
- C:\\PROJECTS\\unix-store-service\\flutter_app\\build\\web\\manifest.json:  C:\\PROJECTS\\unix-store-service\\flutter_app\\web\\index.html C:\\PROJECTS\\unix-store-service\\flutter_app\\web\\manifest.json

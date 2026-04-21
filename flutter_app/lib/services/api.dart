@@ -10,6 +10,7 @@ import '../models/requisition.dart';
 import '../models/pos_product.dart';
 import '../models/yield_config.dart';
 import '../models/feature_flag.dart';
+import '../models/timeline_entry.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -290,9 +291,24 @@ class ApiService {
   }
 
   /// Phase 8: [reason] is stored as issue_notes so the requester sees why it was rejected.
-  Future<void> rejectRequisition(String id, {String? reason}) async {
+  Future<void> rejectRequisition(String id, {String? reason, String? rejectedBy}) async {
     await _patch('/api/requisitions/$id/reject', {
       if (reason != null && reason.isNotEmpty) 'reject_reason': reason,
+      if (rejectedBy != null && rejectedBy.isNotEmpty) 'rejected_by': rejectedBy,
+    });
+  }
+
+  // ── Requisition Timeline ────────────────────────────────────
+
+  Future<List<TimelineEntry>> getRequisitionTimeline(String id) async {
+    final data = await _get('/api/requisitions/$id/timeline');
+    return (data as List).map((e) => TimelineEntry.fromJson(e)).toList();
+  }
+
+  Future<void> addTimelineComment(String reqId, String actorName, String message) async {
+    await _post('/api/requisitions/$reqId/timeline', {
+      'actor_name': actorName,
+      'message':    message,
     });
   }
 

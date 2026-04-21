@@ -16,6 +16,8 @@ class Requisition {
   final double? issuedQuantity;
   /// Phase 8: storekeeper's note explaining an adjustment or rejection reason.
   final String? issueNotes;
+  /// Number of timeline entries (system events + comments) on this requisition.
+  final int timelineCount;
 
   const Requisition({
     required this.id,
@@ -33,6 +35,7 @@ class Requisition {
     this.issuedBy,
     this.issuedQuantity,
     this.issueNotes,
+    this.timelineCount = 0,
   });
 
   factory Requisition.fromJson(Map<String, dynamic> j) => Requisition(
@@ -51,6 +54,7 @@ class Requisition {
         issuedBy:         j['issued_by'] as String?,
         issuedQuantity:   double.tryParse(j['issued_quantity']?.toString() ?? ''),
         issueNotes:       j['issue_notes'] as String?,
+        timelineCount:    int.tryParse(j['timeline_count']?.toString() ?? '0') ?? 0,
       );
 
   bool get isPending   => status == 'Pending';
@@ -58,6 +62,7 @@ class Requisition {
   bool get isRejected  => status == 'Rejected';
   bool get isSales     => purpose == 'Sales';
   bool get isStaffMeal => purpose == 'Staff Meal';
+  bool get hasActivity => timelineCount > 0;
 
   /// True when this requisition is a kitchen "new item" request (no inventory_item_id).
   bool get isNewItemRequest =>
@@ -66,8 +71,6 @@ class Requisition {
       notes!.startsWith('[NEW ITEM REQUEST]');
 
   /// Parses the item name from the structured notes prefix.
-  /// e.g. "[NEW ITEM REQUEST] Name: Jasmine Rice | Qty: 5 kg | Notes: urgent"
-  /// Returns null if not a new item request or notes are malformed.
   String? get newItemName {
     if (!isNewItemRequest) return null;
     final match = RegExp(r'Name:\s*([^|]+)').firstMatch(notes!);

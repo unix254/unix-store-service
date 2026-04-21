@@ -563,12 +563,16 @@ class _RunDetailPanelState extends State<_RunDetailPanel> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Row 1: title + status badge
-              Row(children: [
-                Text('Pay Run: ${widget.run['run_date']}',
-                    style: const TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.w700)),
-                const SizedBox(width: 12),
-                _StatusBadge(status: status),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text('Pay Run: ${widget.run['run_date']}',
+                        style: const TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w700)),
+                  ),
+                  const SizedBox(width: 12),
+                  _StatusBadge(status: status),
               ]),
               const SizedBox(height: 4),
               Text('${included.length} suppliers · ${_kes.format(totalApproved)}',
@@ -578,7 +582,7 @@ class _RunDetailPanelState extends State<_RunDetailPanel> {
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                alignment: WrapAlignment.end,
+                alignment: WrapAlignment.start,
                 children: [
                   // Phase 7: Draft → Approved in one step, no owner WhatsApp sign-off.
                   if (isDraft) ...[

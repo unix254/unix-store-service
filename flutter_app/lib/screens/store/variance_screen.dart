@@ -111,51 +111,79 @@ class _VarianceHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final fmt = DateFormat('HH:mm:ss');
     return Container(
-      padding: const EdgeInsets.fromLTRB(28, 24, 24, 16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(bottom: BorderSide(color: Color(0xFFE0E0E0))),
       ),
-      child: Row(
-        children: [
-          const Icon(Icons.analytics_rounded,
-              color: AppTheme.pinTeal, size: 26),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isMobile = constraints.maxWidth < 800;
+          final titleWidget = Row(
+            children: [
+              const Icon(Icons.analytics_rounded,
+                  color: AppTheme.pinTeal, size: 26),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Usage Variance — Today',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w700)),
+                    if (lastRefreshed != null)
+                      Text('Last refreshed: ${fmt.format(lastRefreshed!)}  ·  Auto-refresh every 60s',
+                          style: const TextStyle(
+                              fontSize: 12, color: AppTheme.pinMuted)),
+                  ],
+                ),
+              ),
+            ],
+          );
+          final actionWidget = Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _LegendChip(color: AppTheme.debtRed,   label: 'Over-Issued (loss risk)'),
+              _LegendChip(color: AppTheme.paidGreen, label: 'Under-Issued (saved)'),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: loading ? null : onRefresh,
+                icon: loading
+                    ? const SizedBox(
+                        width: 14, height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2,
+                            color: Colors.white))
+                    : const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Refresh'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.pinTeal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                ),
+              ),
+            ],
+          );
+
+          if (isMobile) {
+            return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Usage Variance — Today',
-                    style: TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.w700)),
-                if (lastRefreshed != null)
-                  Text('Last refreshed: ${fmt.format(lastRefreshed!)}  ·  Auto-refresh every 60s',
-                      style: const TextStyle(
-                          fontSize: 12, color: AppTheme.pinMuted)),
+                titleWidget,
+                const SizedBox(height: 12),
+                actionWidget,
               ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          // Legend chips
-          _LegendChip(color: AppTheme.debtRed,   label: 'Over-Issued (loss risk)'),
-          const SizedBox(width: 8),
-          _LegendChip(color: AppTheme.paidGreen, label: 'Under-Issued (saved)'),
-          const SizedBox(width: 16),
-          FilledButton.icon(
-            onPressed: loading ? null : onRefresh,
-            icon: loading
-                ? const SizedBox(
-                    width: 14, height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2,
-                        color: Colors.white))
-                : const Icon(Icons.refresh_rounded, size: 18),
-            label: const Text('Refresh'),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.pinTeal,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            ),
-          ),
-        ],
+            );
+          } else {
+            return Row(
+              children: [
+                Expanded(child: titleWidget),
+                const SizedBox(width: 16),
+                actionWidget,
+              ],
+            );
+          }
+        },
       ),
     );
   }
@@ -194,19 +222,19 @@ class _SummaryBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       color: const Color(0xFFF5F5F5),
-      child: Row(
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 12,
         children: [
           _StatChip(label: 'Items Tracked', value: total.toString(),
               color: AppTheme.pinTeal),
-          const SizedBox(width: 12),
           _StatChip(label: 'Over-Issued', value: overIssued.toString(),
               color: overIssued > 0 ? AppTheme.debtRed : Colors.grey),
-          const SizedBox(width: 12),
           _StatChip(label: 'Under-Issued', value: underIssued.toString(),
               color: underIssued > 0 ? AppTheme.paidGreen : Colors.grey),
-          const SizedBox(width: 12),
           _StatChip(label: 'On Track', value: onTrack.toString(),
               color: Colors.blueGrey),
         ],
@@ -288,21 +316,25 @@ class _VarianceTable extends StatelessWidget {
           ),
 
           // Table
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Table(
-              border: TableBorder.all(
-                color: const Color(0xFFE0E0E0),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 800),
+              child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-              ),
-              columnWidths: const {
-                0: FlexColumnWidth(2.2),   // POS Product
-                1: FlexColumnWidth(2.0),   // Store Item
-                2: FlexColumnWidth(1.2),   // Expected Issues
-                3: FlexColumnWidth(1.2),   // Actual Issues
-                4: FlexColumnWidth(1.2),   // Variance
-                5: FlexColumnWidth(0.9),   // UOM
-              },
+                child: Table(
+                  border: TableBorder.all(
+                    color: const Color(0xFFE0E0E0),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  columnWidths: const {
+                    0: FlexColumnWidth(2.2),   // POS Product
+                    1: FlexColumnWidth(2.0),   // Store Item
+                    2: FlexColumnWidth(1.2),   // Expected Issues
+                    3: FlexColumnWidth(1.2),   // Actual Issues
+                    4: FlexColumnWidth(1.2),   // Variance
+                    5: FlexColumnWidth(0.9),   // UOM
+                  },
               children: [
                 // Header row
                 TableRow(
@@ -361,6 +393,8 @@ class _VarianceTable extends StatelessWidget {
                 }),
               ],
             ),
+          ),
+          ),
           ),
         ],
       ),

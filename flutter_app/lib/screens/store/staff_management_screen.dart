@@ -250,174 +250,352 @@ class _StaffCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final roleColor = _roleColors[member.role] ?? Colors.grey;
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-            color: member.active
-                ? const Color(0xFFE0E0E0)
-                : Colors.grey.shade300),
-      ),
-      color: member.active ? Colors.white : Colors.grey.shade50,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        child: Row(
-          children: [
-            // Avatar
-            CircleAvatar(
-              radius: 22,
-              backgroundColor: roleColor.withOpacity(member.active ? 0.15 : 0.07),
-              child: Text(
-                member.name.isNotEmpty ? member.name[0].toUpperCase() : '?',
-                style: TextStyle(
-                    color: member.active ? roleColor : Colors.grey,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 16),
-              ),
-            ),
-            const SizedBox(width: 16),
-
-            // Name + role badge
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 600;
+        return Card(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(
+                color: member.active
+                    ? const Color(0xFFE0E0E0)
+                    : Colors.grey.shade300),
+          ),
+          color: member.active ? Colors.white : Colors.grey.shade50,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            child: isMobile
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(member.name,
-                          style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: member.active
-                                  ? const Color(0xFF263238)
-                                  : Colors.grey)),
-                      const SizedBox(width: 8),
-                      if (!member.active)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade200,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text('INACTIVE',
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Avatar
+                          CircleAvatar(
+                            radius: 22,
+                            backgroundColor: roleColor.withOpacity(member.active ? 0.15 : 0.07),
+                            child: Text(
+                              member.name.isNotEmpty ? member.name[0].toUpperCase() : '?',
                               style: TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.grey,
-                                  fontWeight: FontWeight.w700)),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: [
-                      // Role badge
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: roleColor.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(member.roleLabel,
-                            style: TextStyle(
-                                fontSize: 11,
-                                color: roleColor,
-                                fontWeight: FontWeight.w600)),
-                      ),
-                      // Location badge
-                      if (member.locationName != null)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.blueGrey.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(4),
+                                  color: member.active ? roleColor : Colors.grey,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 16),
+                            ),
                           ),
-                          child: Row(
+                          const SizedBox(width: 16),
+                          
+                          // Name + role badge
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(member.name,
+                                          style: TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600,
+                                              color: member.active
+                                                  ? const Color(0xFF263238)
+                                                  : Colors.grey)),
+                                    ),
+                                    if (!member.active)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 7, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade200,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: const Text('INACTIVE',
+                                            style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.grey,
+                                                fontWeight: FontWeight.w700)),
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 4,
+                                  children: [
+                                    // Role badge
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: roleColor.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(member.roleLabel,
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              color: roleColor,
+                                              fontWeight: FontWeight.w600)),
+                                    ),
+                                    // Location badge
+                                    if (member.locationName != null)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.blueGrey.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.location_on_rounded,
+                                                size: 10, color: Colors.blueGrey),
+                                            const SizedBox(width: 3),
+                                            Text(member.locationName!,
+                                                style: const TextStyle(
+                                                    fontSize: 11, color: Colors.blueGrey)),
+                                          ],
+                                        ),
+                                      ),
+                                    // Capability count badge
+                                    if (member.capabilities.isNotEmpty)
+                                      Tooltip(
+                                        message: member.capabilities
+                                            .map((c) => kAllCapabilities
+                                                .firstWhere((k) => k.$1 == c,
+                                                    orElse: () => (c, c))
+                                                .$2)
+                                            .join('\n'),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: AppTheme.pinTeal.withOpacity(0.1),
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Text('${member.capabilities.length} capabilities',
+                                              style: const TextStyle(
+                                                  fontSize: 11, color: AppTheme.pinTeal)),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      const Divider(height: 1),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          // PIN mask hint
+                          Container(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF5F5F5),
+                              borderRadius: BorderRadius.circular(8),
+                              border:
+                                  Border.all(color: const Color(0xFFE0E0E0)),
+                            ),
+                            child: const Text('PIN: ••••',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.pinMuted,
+                                    fontFamily: 'monospace')),
+                          ),
+                          // Actions
+                          Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.location_on_rounded,
-                                  size: 10, color: Colors.blueGrey),
-                              const SizedBox(width: 3),
-                              Text(member.locationName!,
-                                  style: const TextStyle(
-                                      fontSize: 11, color: Colors.blueGrey)),
+                              IconButton(
+                                onPressed: onEdit,
+                                icon: const Icon(Icons.edit_rounded, size: 18),
+                                color: Colors.blueGrey,
+                                tooltip: 'Edit',
+                              ),
+                              IconButton(
+                                onPressed: onToggle,
+                                icon: Icon(
+                                  member.active
+                                      ? Icons.person_off_rounded
+                                      : Icons.person_rounded,
+                                  size: 18,
+                                ),
+                                color: member.active ? Colors.orange : AppTheme.paidGreen,
+                                tooltip: member.active ? 'Deactivate' : 'Reactivate',
+                              ),
+                              IconButton(
+                                onPressed: onDelete,
+                                icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                                color: AppTheme.debtRed,
+                                tooltip: 'Delete permanently',
+                              ),
                             ],
                           ),
+                        ],
+                      ),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      // Avatar
+                      CircleAvatar(
+                        radius: 22,
+                        backgroundColor: roleColor.withOpacity(member.active ? 0.15 : 0.07),
+                        child: Text(
+                          member.name.isNotEmpty ? member.name[0].toUpperCase() : '?',
+                          style: TextStyle(
+                              color: member.active ? roleColor : Colors.grey,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16),
                         ),
-                      // Capability count badge
-                      if (member.capabilities.isNotEmpty)
-                        Tooltip(
-                          message: member.capabilities
-                              .map((c) => kAllCapabilities
-                                  .firstWhere((k) => k.$1 == c,
-                                      orElse: () => (c, c))
-                                  .$2)
-                              .join('\n'),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: AppTheme.pinTeal.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(4),
+                      ),
+                      const SizedBox(width: 16),
+
+                      // Name + role badge
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(member.name,
+                                    style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600,
+                                        color: member.active
+                                            ? const Color(0xFF263238)
+                                            : Colors.grey)),
+                                const SizedBox(width: 8),
+                                if (!member.active)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey.shade200,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text('INACTIVE',
+                                        style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.grey,
+                                            fontWeight: FontWeight.w700)),
+                                  ),
+                              ],
                             ),
-                            child: Text('${member.capabilities.length} capabilities',
-                                style: const TextStyle(
-                                    fontSize: 11, color: AppTheme.pinTeal)),
-                          ),
+                            const SizedBox(height: 4),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              children: [
+                                // Role badge
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: roleColor.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(member.roleLabel,
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          color: roleColor,
+                                          fontWeight: FontWeight.w600)),
+                                ),
+                                // Location badge
+                                if (member.locationName != null)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blueGrey.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.location_on_rounded,
+                                            size: 10, color: Colors.blueGrey),
+                                        const SizedBox(width: 3),
+                                        Text(member.locationName!,
+                                            style: const TextStyle(
+                                                fontSize: 11, color: Colors.blueGrey)),
+                                      ],
+                                    ),
+                                  ),
+                                // Capability count badge
+                                if (member.capabilities.isNotEmpty)
+                                  Tooltip(
+                                    message: member.capabilities
+                                        .map((c) => kAllCapabilities
+                                            .firstWhere((k) => k.$1 == c,
+                                                orElse: () => (c, c))
+                                            .$2)
+                                        .join('\n'),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.pinTeal.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text('${member.capabilities.length} capabilities',
+                                          style: const TextStyle(
+                                              fontSize: 11, color: AppTheme.pinTeal)),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
                         ),
+                      ),
+
+                      // PIN mask hint
+                      Container(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF5F5F5),
+                          borderRadius: BorderRadius.circular(8),
+                          border:
+                              Border.all(color: const Color(0xFFE0E0E0)),
+                        ),
+                        child: const Text('PIN: ••••',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.pinMuted,
+                                fontFamily: 'monospace')),
+                      ),
+                      const SizedBox(width: 12),
+
+                      // Actions
+                      IconButton(
+                        onPressed: onEdit,
+                        icon: const Icon(Icons.edit_rounded, size: 18),
+                        color: Colors.blueGrey,
+                        tooltip: 'Edit',
+                      ),
+                      IconButton(
+                        onPressed: onToggle,
+                        icon: Icon(
+                          member.active
+                              ? Icons.person_off_rounded
+                              : Icons.person_rounded,
+                          size: 18,
+                        ),
+                        color: member.active ? Colors.orange : AppTheme.paidGreen,
+                        tooltip: member.active ? 'Deactivate' : 'Reactivate',
+                      ),
+                      IconButton(
+                        onPressed: onDelete,
+                        icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                        color: AppTheme.debtRed,
+                        tooltip: 'Delete permanently',
+                      ),
                     ],
                   ),
-                ],
-              ),
-            ),
-
-            // PIN mask hint
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF5F5F5),
-                borderRadius: BorderRadius.circular(8),
-                border:
-                    Border.all(color: const Color(0xFFE0E0E0)),
-              ),
-              child: const Text('PIN: ••••',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.pinMuted,
-                      fontFamily: 'monospace')),
-            ),
-            const SizedBox(width: 12),
-
-            // Actions
-            IconButton(
-              onPressed: onEdit,
-              icon: const Icon(Icons.edit_rounded, size: 18),
-              color: Colors.blueGrey,
-              tooltip: 'Edit',
-            ),
-            IconButton(
-              onPressed: onToggle,
-              icon: Icon(
-                member.active
-                    ? Icons.person_off_rounded
-                    : Icons.person_rounded,
-                size: 18,
-              ),
-              color: member.active ? Colors.orange : AppTheme.paidGreen,
-              tooltip: member.active ? 'Deactivate' : 'Reactivate',
-            ),
-            IconButton(
-              onPressed: onDelete,
-              icon: const Icon(Icons.delete_outline_rounded, size: 18),
-              color: AppTheme.debtRed,
-              tooltip: 'Delete permanently',
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

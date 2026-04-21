@@ -7,6 +7,7 @@ import '../../models/inventory_item.dart';
 import '../../models/requisition.dart';
 import '../../services/api.dart';
 import '../pin_login.dart';
+import '../store/requisition_timeline_sheet.dart';
 
 /// A single entry in the request basket.
 class _BasketItem {
@@ -453,6 +454,16 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  Future<void> _openTimeline(Requisition req) async {
+    await showRequisitionTimeline(
+      context,
+      req:             req,
+      currentUserName: widget.staff.name,
+    );
+    // Refresh so the timeline count badge updates after commenting.
+    _loadMyRequests();
+  }
+
   void _logOut() {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const PinLoginScreen()),
@@ -475,6 +486,7 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
                   requests: _myRequests,
                   loading: _loadingRequests,
                   onRefresh: _loadMyRequests,
+                  onOpenTimeline: _openTimeline,
                 )
               : null,
           body: SafeArea(
@@ -516,6 +528,7 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
                               onRefreshReqs:      _loadMyRequests,
                               onSearch:           (v) => setState(() => _search = v),
                               onNewItemRequest:   _showNewItemRequestDialog,
+                              onOpenTimeline:     _openTimeline,
                             ),
                 ),
               ],
@@ -648,6 +661,7 @@ class _Body extends StatelessWidget {
   final VoidCallback onRefreshReqs;
   final void Function(String) onSearch;
   final VoidCallback onNewItemRequest;
+  final void Function(Requisition) onOpenTimeline;
 
   const _Body({
     required this.items,
@@ -672,6 +686,7 @@ class _Body extends StatelessWidget {
     required this.onRefreshReqs,
     required this.onSearch,
     required this.onNewItemRequest,
+    required this.onOpenTimeline,
   });
 
   @override
@@ -708,9 +723,10 @@ class _Body extends StatelessWidget {
         SizedBox(
           width: 320,
           child: _MyRequestsPanel(
-            requests:  myRequests,
-            loading:   loadingReqs,
-            onRefresh: onRefreshReqs,
+            requests:       myRequests,
+            loading:        loadingReqs,
+            onRefresh:      onRefreshReqs,
+            onOpenTimeline: onOpenTimeline,
           ),
         ),
       ],
@@ -1493,9 +1509,14 @@ class _MyRequestsPanel extends StatelessWidget {
   final List<Requisition> requests;
   final bool loading;
   final VoidCallback onRefresh;
+  final void Function(Requisition) onOpenTimeline;
 
-  const _MyRequestsPanel(
-      {required this.requests, required this.loading, required this.onRefresh});
+  const _MyRequestsPanel({
+    required this.requests,
+    required this.loading,
+    required this.onRefresh,
+    required this.onOpenTimeline,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1545,7 +1566,10 @@ class _MyRequestsPanel extends StatelessWidget {
                         padding: const EdgeInsets.all(12),
                         itemCount: requests.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 8),
-                        itemBuilder: (_, i) => _RequestCard(req: requests[i]),
+                        itemBuilder: (_, i) => _RequestCard(
+                          req:        requests[i],
+                          onTimeline: () => onOpenTimeline(requests[i]),
+                        ),
                       ),
           ),
         ],
@@ -1556,7 +1580,9 @@ class _MyRequestsPanel extends StatelessWidget {
 
 class _RequestCard extends StatelessWidget {
   final Requisition req;
-  const _RequestCard({required this.req});
+  final VoidCallback? onTimeline;
+
+  const _RequestCard({required this.req, this.onTimeline});
 
   @override
   Widget build(BuildContext context) {
@@ -1578,43 +1604,84 @@ class _RequestCard extends StatelessWidget {
 
     final timeFmt = DateFormat('HH:mm');
     final time = req.requestedAt.isNotEmpty
-        ? timeFmt.format(
-            DateTime.tryParse(req.requestedAt) ?? DateTime.now())
+        ? timeFmt.format(DateTime.tryParse(req.requestedAt) ?? DateTime.now())
         : '–';
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A2A38),
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTimeline,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: statusColor.withOpacity(0.3), width: 1),
-      ),
-      child: Row(
-        children: [
-          Icon(statusIcon, color: statusColor, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(req.itemName,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(height: 2),
-                Text(
-                  '${req.quantity.toStringAsFixed(req.quantity % 1 == 0 ? 0 : 1)} '
-                  '${req.unitOfMeasure ?? req.itemUom ?? ''} · ${req.purpose}',
-                  style:
-                      const TextStyle(color: AppTheme.pinMuted, fontSize: 11),
-                ),
-              ],
-            ),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A2A38),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: statusColor.withOpacity(0.3), width: 1),
           ),
-          Text(time,
-              style: const TextStyle(color: AppTheme.pinMuted, fontSize: 11)),
-        ],
+          child: Row(
+            children: [
+              Icon(statusIcon, color: statusColor, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      req.isNewItemRequest
+                          ? (req.newItemName ?? req.itemName)
+                          : req.itemName,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${req.quantity.toStringAsFixed(req.quantity % 1 == 0 ? 0 : 1)} '
+                      '${req.unitOfMeasure ?? req.itemUom ?? ''} · ${req.purpose}',
+                      style: const TextStyle(
+                          color: AppTheme.pinMuted, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+              // Timeline activity indicator
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(time,
+                      style: const TextStyle(
+                          color: AppTheme.pinMuted, fontSize: 11)),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.chat_bubble_outline_rounded,
+                        size: 13,
+                        color: req.hasActivity
+                            ? AppTheme.pinTeal
+                            : const Color(0xFF37474F),
+                      ),
+                      if (req.timelineCount > 0) ...[
+                        const SizedBox(width: 3),
+                        Text(
+                          '${req.timelineCount}',
+                          style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.pinTeal),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1681,6 +1748,7 @@ class _MenuDrawer extends StatelessWidget {
   final List<Requisition> requests;
   final bool loading;
   final VoidCallback onRefresh;
+  final void Function(Requisition) onOpenTimeline;
 
   const _MenuDrawer({
     required this.staff,
@@ -1689,6 +1757,7 @@ class _MenuDrawer extends StatelessWidget {
     required this.requests,
     required this.loading,
     required this.onRefresh,
+    required this.onOpenTimeline,
   });
 
   @override
@@ -1712,9 +1781,10 @@ class _MenuDrawer extends StatelessWidget {
             const Divider(color: Color(0xFF1E2D3D), height: 1),
             Expanded(
               child: _MyRequestsPanel(
-                requests: requests,
-                loading: loading,
-                onRefresh: onRefresh,
+                requests:       requests,
+                loading:        loading,
+                onRefresh:      onRefresh,
+                onOpenTimeline: onOpenTimeline,
               ),
             ),
             const Divider(color: Color(0xFF1E2D3D), height: 1),

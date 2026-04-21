@@ -1288,3 +1288,23 @@ Triggered in `_save()` after a successful `adjustStock` call that returns a `pri
 The `_PriceAdvisoryDialog` uses two `NumberFormat` instances (`costFmt` with 2 decimals for per-portion cost, `costFmt0` with 0 decimals for headline prices). This is intentional — KES headline prices are always round integers in the POS, but per-portion cost rises will often be fractional (e.g., KES 12.50/portion).
 
 The `products` table is assumed to be in the same MySQL database as the unix_ tables. If uniCenta is on a separate schema or database, a `db_prefix.products` reference or a cross-schema connection setting may be needed. The `LEFT JOIN` gracefully handles missing rows if the table doesn't exist in this context (query error caught in the outer try/catch).
+
+---
+
+## Milestone 18 — Requisition Audit Timeline (Completed: 2026-04-21)
+
+### Summary
+Implemented an immutable audit timeline for requisitions. System events are auto-logged on create/issue/reject. Kitchen and Store staff can add comments. No edit or delete endpoints exist — by design.
+
+### Changes
+- **`migrations/017_requisition_timeline.sql`** — new `store_requisition_timeline` table (FK → `store_requisitions`, CASCADE delete)
+- **`src/routes/requisitions.js`** — `logTimelineEvent()` fire-and-forget helper; `timeline_count` subquery on all GET list endpoints; hooks on POST/issue/reject; new GET and POST `/api/requisitions/:id/timeline` endpoints; `PATCH /:id/reject` now accepts `rejected_by`
+- **`flutter_app/lib/models/timeline_entry.dart`** — new model; `isSystem`/`isComment`/`formattedTime` getters
+- **`flutter_app/lib/models/requisition.dart`** — added `timelineCount`, `hasActivity`
+- **`flutter_app/lib/services/api.dart`** — added `getRequisitionTimeline`, `addTimelineComment`, extended `rejectRequisition` with `rejectedBy`
+- **`flutter_app/lib/screens/store/requisition_timeline_sheet.dart`** — new bottom sheet; system event pills, comment bubbles, comment input bar
+- **`flutter_app/lib/screens/store/requisition_approval.dart`** — chat icon badge on each card; `_openTimeline()` method; `rejected_by` wired
+
+### API
+| GET | `/api/requisitions/:id/timeline` | Fetch audit log |
+| POST | `/api/requisitions/:id/timeline` | Add user comment |

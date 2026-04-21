@@ -130,25 +130,47 @@ class _YieldConfigScreenState extends State<YieldConfigScreen> {
         // ── Header ────────────────────────────────────────────
         Container(
           color: AppTheme.surface,
-          padding: const EdgeInsets.fromLTRB(24, 16, 16, 12),
-          child: Row(
-            children: [
-              const Text('Yield Configuration',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: const Icon(Icons.refresh_rounded),
-                onPressed: _loadAll,
-                tooltip: 'Refresh',
-                color: AppTheme.primary,
-              ),
-              const Spacer(),
-              ElevatedButton.icon(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isMobile = constraints.maxWidth < 600;
+              final titleWidget = Row(
+                children: [
+                  const Text('Yield Configuration',
+                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.refresh_rounded),
+                    onPressed: _loadAll,
+                    tooltip: 'Refresh',
+                    color: AppTheme.primary,
+                  ),
+                ],
+              );
+              final actionWidget = ElevatedButton.icon(
                 onPressed: _showAddDialog,
                 icon: const Icon(Icons.add_rounded, size: 18),
                 label: const Text('Add Mapping'),
-              ),
-            ],
+              );
+              
+              if (isMobile) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    titleWidget,
+                    const SizedBox(height: 12),
+                    actionWidget,
+                  ],
+                );
+              } else {
+                return Row(
+                  children: [
+                    Expanded(child: titleWidget),
+                    actionWidget,
+                  ],
+                );
+              }
+            },
           ),
         ),
 

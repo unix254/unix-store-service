@@ -1,53 +1,12 @@
-# Milestone 17: Database Prefix & Microservice Isolation
+# Milestone: Procurement Item Removal / Postponement
 
-**Context:**
-Currently, our backend tables all use the `unix_` prefix. However, as the ecosystem grows (e.g., M-Pesa Service, Yunix Wash), multiple companion apps connect to the same central MariaDB `unicentapos` database.
-Using the same `unix_` prefix puts us at risk of catastrophic migration collisions (where one service might accidentally modify or drop tables belonging to another). 
+**Context & Business Goal:**
+When the system generates a suggested procurement list (items that have fallen below their reorder thresholds), it currently allows the user to adjust the suggested quantities. However, sometimes the user doesn't want to order a specific suggested item right now (e.g. postponing ordering Cheese). Currently, there's no way to explicitly drop or remove an item from the draft procurement list before finalizing the order. 
+We need a way to explicitly "remove" or "postpone" an item from this draft list, similar to the exclusion functionality that already exists in the Payruns screen.
 
-We are moving to a **Hybrid Prefix Architecture**:
-1. **`store_`**: For tables completely isolated and belonging only to this `unix-store-service`.
-2. **`yunix_`**: For core ecosystem tables that multiple services (like the Waiter app and Store app) share.
-
----
-
-### Task 1: Update Existing Migration History (`migrations/`)
-You need to do a massive rename in the actual raw migration files (`000` through `014` or wherever we are at map). 
-Find and replace all `unix_` instances in the `migrations/` folder SQL files based on this mapping:
-
-**Store-specific tables (Change `unix_[name]` to `store_[name]`):**
-- `unix_migrations` -> `store_migrations`  *(CRITICAL: this ensures our backend doesn't read the M-Pesa migration table)*
-- `unix_store_inventory` -> `store_inventory` *(Drop the redundant 'store', just store_inventory)*
-- `unix_suppliers` -> `store_suppliers`
-- `unix_supplier_ledger` -> `store_supplier_ledger`
-- `unix_requisitions` -> `store_requisitions`
-- `unix_yield_config` -> `store_yield_config`
-- `unix_cost_history` -> `store_cost_history`
-- `unix_pay_runs` -> `store_pay_runs`
-- `unix_pay_run_details` -> `store_pay_run_details`
-- `unix_purchase_orders` -> `store_purchase_orders`
-- `unix_po_details` -> `store_po_details`
-- `unix_procurement_logs` -> `store_procurement_logs`
-
-**Shared Eco-system Tables (Change `unix_[name]` to `yunix_[name]`):**
-- `unix_staff` -> `yunix_staff`
-- `unix_settings` -> `yunix_settings`
-- `unix_feature_flags` -> `yunix_feature_flags`
-
-*(Note: Carefully ensure you don't break string matching rules in SQL. Just rename the tables).*
-
-### Task 2: Create a State-Saving Migration Hook
-Because the client's staging server is *already* running with the old `unix_` tables, if we just push this, the backend will boot up, panic, and create empty `store_` tables, losing all their data!
-- Create a new migration file (e.g. `015_rename_existing_tables_for_isolation.sql`).
-- In this file, write safe `RENAME TABLE` SQL commands that check if the old `unix_` table exists, and if so, renames it. 
-- *Caveat:* Since MariaDB doesn't natively support `RENAME TABLE IF EXISTS` easily without procedural logic, write concise, safe `ALTER TABLE` / `RENAME` scripts wrapped carefully, or use Node.js migration framework logic to catch/ignore "table doesn't exist" errors if it's already renamed. 
-  - Actually, we do migrations in JS inside `db.js`. Please ensure that when the Node.js app boots, before it runs migrations tracked in `store_migrations`, it executes a hardcoded raw SQL script converting the old tables so no data is lost!
-
-### Task 3: Global Backend Refactoring (`src/`)
-- Run a global workspace search across `src/**/*.js`.
-- Replace all references to the old `unix_` table names with their respective `store_` or `yunix_` names exactly matching the map in Task 1.
-
-### Task 4: Global Frontend Verification (`flutter_app/`)
-- Ensure our Flutter Dart code doesn't have hardcoded `unix_` logic (it shouldn't, as it communicates via JSON models/APIs, but double check things like the capability arrays or yield mappings).
-
-### Important Note for Claude:
-After completing this, please ensure the backend starts successfully and doesn't crash on Boot due to the migration engine looking for the new `store_migrations` table! Write your completion details natively into `claude_feedback.md`.
+**Instructions for Claude (The Engineer):**
+1. **Locate the Procurement Screen**: Find the screen/widget in the Flutter app where the suggested procurement list is displayed and finalized (likely `procurement_screen.dart` or similar).
+2. **Review Existing Pattern**: Check how item removal/exclusion is handled in the Payruns screen to maintain UI consistency across the ecosystem.
+3. **Implement Removal UI**: Add an intuitive UI element (e.g., a trailing minus/delete icon button, a swipe-to-dismiss action, or an "exclude" checkbox) to the suggested procurement item cards. 
+4. **Implement State Management**: When the user clicks remove/postpone on an item, it should be removed from the active draft list so that it is NOT submitted to the backend, NOT saved to the database, and NOT included in the final WhatsApp/PDF sent to the supplier.
+5. **Feedback Loop**: Please execute the changes and log your architectural choices and completion details natively into `claude_feedback.md`.

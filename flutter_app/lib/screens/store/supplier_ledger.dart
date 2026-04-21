@@ -410,56 +410,88 @@ class _SupplierDetailState extends State<_SupplierDetail> {
     final s = widget.supplier;
     final balance = s.balanceDue;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // ── Supplier Header ──────────────────────────────────
-        Container(
-          color: AppTheme.surface,
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 600;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Supplier Header ──────────────────────────────────
+            Container(
+              color: AppTheme.surface,
+              padding: EdgeInsets.fromLTRB(isMobile ? 16 : 24, 16, isMobile ? 16 : 24, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  if (isMobile) ...[
+                    Text(s.name,
+                        style: const TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 12),
+                    _BalanceSummaryCard(balance: balance),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
                       children: [
-                        Text(s.name,
-                            style: const TextStyle(
-                                fontSize: 22, fontWeight: FontWeight.w800)),
-                        const SizedBox(height: 4),
-                        Wrap(
-                          spacing: 16,
-                          children: [
-                            if (s.phone != null)
-                              _InfoChip(
-                                  icon: Icons.phone_rounded,
-                                  label: s.phone!),
-                            if (s.location != null)
-                              _InfoChip(
-                                  icon: Icons.location_on_rounded,
-                                  label: s.location!),
-                            if (s.paymentDay != null)
-                              _InfoChip(
-                                  icon: Icons.calendar_today_rounded,
-                                  label: 'Pays: ${s.paymentDay}'),
-                            if (s.leadTimeDays > 0)
-                              _InfoChip(
-                                  icon: Icons.local_shipping_rounded,
-                                  label: '${s.leadTimeDays}d lead time'),
-                          ],
-                        ),
+                        if (s.phone != null)
+                          _InfoChip(icon: Icons.phone_rounded, label: s.phone!),
+                        if (s.location != null)
+                          _InfoChip(
+                              icon: Icons.location_on_rounded,
+                              label: s.location!),
+                        if (s.paymentDay != null)
+                          _InfoChip(
+                              icon: Icons.calendar_today_rounded,
+                              label: 'Pays: ${s.paymentDay}'),
+                        if (s.leadTimeDays > 0)
+                          _InfoChip(
+                              icon: Icons.local_shipping_rounded,
+                              label: '${s.leadTimeDays}d lead time'),
                       ],
                     ),
-                  ),
-                  const SizedBox(width: 16),
-                  // Balance card
-                  _BalanceSummaryCard(balance: balance),
-                ],
-              ),
-              const SizedBox(height: 16),
+                  ] else ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(s.name,
+                                  style: const TextStyle(
+                                      fontSize: 22, fontWeight: FontWeight.w800)),
+                              const SizedBox(height: 4),
+                              Wrap(
+                                spacing: 16,
+                                children: [
+                                  if (s.phone != null)
+                                    _InfoChip(
+                                        icon: Icons.phone_rounded,
+                                        label: s.phone!),
+                                  if (s.location != null)
+                                    _InfoChip(
+                                        icon: Icons.location_on_rounded,
+                                        label: s.location!),
+                                  if (s.paymentDay != null)
+                                    _InfoChip(
+                                        icon: Icons.calendar_today_rounded,
+                                        label: 'Pays: ${s.paymentDay}'),
+                                  if (s.leadTimeDays > 0)
+                                    _InfoChip(
+                                        icon: Icons.local_shipping_rounded,
+                                        label: '${s.leadTimeDays}d lead time'),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        _BalanceSummaryCard(balance: balance),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 16),
               // Action buttons
               Wrap(
                 spacing: 10,
@@ -554,7 +586,9 @@ class _SupplierDetailState extends State<_SupplierDetail> {
                     )
                   : _LedgerTable(entries: _entries),
         ),
-      ],
+          ],
+        );
+      },
     );
   }
 }

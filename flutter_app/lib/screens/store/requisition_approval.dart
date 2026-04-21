@@ -6,6 +6,7 @@ import '../../models/staff.dart';
 import '../../models/requisition.dart';
 import '../../models/supplier.dart';
 import '../../services/api.dart';
+import 'requisition_timeline_sheet.dart';
 
 final _timeFmt = DateFormat('HH:mm');
 final _dateFmt = DateFormat('dd MMM');
@@ -131,12 +132,26 @@ class _RequisitionApprovalScreenState
     );
     if (reason == null) return; // cancelled
     try {
-      await ApiService.instance.rejectRequisition(req.id, reason: reason);
+      await ApiService.instance.rejectRequisition(
+        req.id,
+        reason: reason,
+        rejectedBy: widget.staff.name,
+      );
       _showSuccess('Rejected: ${req.itemName}');
       _loadRequisitions();
     } catch (e) {
       _showError(e.toString());
     }
+  }
+
+  Future<void> _openTimeline(Requisition req) async {
+    await showRequisitionTimeline(
+      context,
+      req:             req,
+      currentUserName: widget.staff.name,
+    );
+    // Refresh counts after the sheet closes (a comment may have been added).
+    _loadRequisitions();
   }
 
   void _showError(String msg) {
@@ -187,13 +202,14 @@ class _RequisitionApprovalScreenState
                       itemCount: _filtered.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
                       itemBuilder: (_, i) => _RequisitionCard(
-                        req:     _filtered[i],
-                        onIssue: _filtered[i].isPending
+                        req:        _filtered[i],
+                        onIssue:    _filtered[i].isPending
                             ? () => _issue(_filtered[i])
                             : null,
-                        onReject: _filtered[i].isPending
+                        onReject:   _filtered[i].isPending
                             ? () => _reject(_filtered[i])
                             : null,
+                        onTimeline: () => _openTimeline(_filtered[i]),
                       ),
                     ),
         ),
@@ -356,9 +372,14 @@ class _RequisitionCard extends StatelessWidget {
   final Requisition req;
   final VoidCallback? onIssue;
   final VoidCallback? onReject;
+  final VoidCallback? onTimeline;
 
-  const _RequisitionCard(
-      {required this.req, this.onIssue, this.onReject});
+  const _RequisitionCard({
+    required this.req,
+    this.onIssue,
+    this.onReject,
+    this.onTimeline,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -377,8 +398,11 @@ class _RequisitionCard extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.all(18),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ── Purpose icon block ─────────────────────────────
             Container(
@@ -539,52 +563,89 @@ class _RequisitionCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 _StatusBadge(status: req.status),
-                const SizedBox(height: 12),
-                if (isPending) ...[
-                  SizedBox(
-                    width: 140,
-                    height: 44,
-                    child: ElevatedButton.icon(
-                      onPressed: onIssue,
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: req.isNewItemRequest
-                              ? const Color(0xFF00796B)
-                              : AppTheme.paidGreen,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10))),
-                      icon: Icon(
-                          req.isNewItemRequest
-                              ? Icons.add_circle_rounded
-                              : Icons.check_rounded,
-                          size: 18, color: Colors.white),
-                      label: Text(
-                          req.isNewItemRequest ? 'Approve' : 'Issue',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                // Chat / timeline button with activity count badge
+                InkWell(
+                  onTap: onTimeline,
+                  borderRadius: BorderRadius.circular(20),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.chat_bubble_outline_rounded,
+                          size: 15,
+                          color: req.hasActivity
+                              ? AppTheme.primary
+                              : Colors.grey.shade400,
+                        ),
+                        if (req.timelineCount > 0) ...[
+                          const SizedBox(width: 4),
+                          Text(
+                            '${req.timelineCount}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: 120,
-                    height: 40,
-                    child: OutlinedButton.icon(
-                      onPressed: onReject,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppTheme.debtRed,
-                        side: const BorderSide(color: AppTheme.debtRed),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
-                      ),
-                      icon: const Icon(Icons.close_rounded, size: 16),
-                      label: const Text('Reject',
-                          style:
-                              TextStyle(fontWeight: FontWeight.w600)),
-                    ),
-                  ),
-                ],
+                ),
+                const SizedBox(height: 4),
               ],
             ),
+          ],
+        ),
+        if (isPending) ...[
+              const SizedBox(height: 16),
+              const Divider(height: 1),
+              const SizedBox(height: 12),
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: onReject,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.debtRed,
+                      side: const BorderSide(color: AppTheme.debtRed),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    label: const Text('Reject',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: onIssue,
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: req.isNewItemRequest
+                            ? const Color(0xFF00796B)
+                            : AppTheme.paidGreen,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                    icon: Icon(
+                        req.isNewItemRequest
+                            ? Icons.add_circle_rounded
+                            : Icons.check_rounded,
+                        size: 18, color: Colors.white),
+                    label: Text(
+                        req.isNewItemRequest ? 'Approve' : 'Issue',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700)),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

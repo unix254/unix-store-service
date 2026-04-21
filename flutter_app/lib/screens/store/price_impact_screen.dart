@@ -127,61 +127,83 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(28, 20, 24, 16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(bottom: BorderSide(color: Color(0xFFE0E0E0))),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Text('Price Impact Advisory',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                SizedBox(height: 2),
-                Text(
-                  'Cost changes linked to POS products via Yield Config. '
-                  'Review selling prices to protect margins.',
-                  style: TextStyle(fontSize: 12, color: AppTheme.pinMuted),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isMobile = constraints.maxWidth < 800;
+          final titleWidget = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              Text('Price Impact Advisory',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              SizedBox(height: 2),
+              Text(
+                'Cost changes linked to POS products via Yield Config. '
+                'Review selling prices to protect margins.',
+                style: TextStyle(fontSize: 12, color: AppTheme.pinMuted),
+              ),
+            ],
+          );
+          
+          final actionsWidget = Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              // Days selector
+              _DaysChip(selected: days == 7,  label: '7d',  onTap: () => onDaysChanged(7)),
+              _DaysChip(selected: days == 30, label: '30d', onTap: () => onDaysChanged(30)),
+              _DaysChip(selected: days == 90, label: '90d', onTap: () => onDaysChanged(90)),
+              const SizedBox(width: 8),
+              // WhatsApp send
+              FilledButton.icon(
+                onPressed: onSendWhatsApp,
+                icon: const Icon(Icons.send_rounded, size: 16),
+                label: const Text('Send via WhatsApp'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF25D366),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
+              ),
+              // Refresh
+              OutlinedButton.icon(
+                onPressed: loading ? null : onRefresh,
+                icon: loading
+                    ? const SizedBox(
+                        width: 14, height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('Refresh'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                ),
+              ),
+            ],
+          );
+
+          if (isMobile) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                titleWidget,
+                const SizedBox(height: 12),
+                actionsWidget,
               ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          // Days selector
-          _DaysChip(selected: days == 7,  label: '7d',  onTap: () => onDaysChanged(7)),
-          const SizedBox(width: 6),
-          _DaysChip(selected: days == 30, label: '30d', onTap: () => onDaysChanged(30)),
-          const SizedBox(width: 6),
-          _DaysChip(selected: days == 90, label: '90d', onTap: () => onDaysChanged(90)),
-          const SizedBox(width: 12),
-          // WhatsApp send
-          FilledButton.icon(
-            onPressed: onSendWhatsApp,
-            icon: const Icon(Icons.send_rounded, size: 16),
-            label: const Text('Send via WhatsApp'),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF25D366),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            ),
-          ),
-          const SizedBox(width: 8),
-          // Refresh
-          OutlinedButton.icon(
-            onPressed: loading ? null : onRefresh,
-            icon: loading
-                ? const SizedBox(
-                    width: 14, height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.refresh_rounded, size: 16),
-            label: const Text('Refresh'),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            ),
-          ),
-        ],
+            );
+          } else {
+            return Row(
+              children: [
+                Expanded(child: titleWidget),
+                const SizedBox(width: 16),
+                actionsWidget,
+              ],
+            );
+          }
+        },
       ),
     );
   }
@@ -383,18 +405,22 @@ class _ItemCard extends StatelessWidget {
                           color: AppTheme.pinMuted,
                           letterSpacing: 1.0)),
                   const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Table(
-                      border: TableBorder.all(
-                          color: const Color(0xFFEEEEEE),
-                          borderRadius: BorderRadius.circular(8)),
-                      columnWidths: const {
-                        0: FlexColumnWidth(3),   // Product name
-                        1: FlexColumnWidth(1.8), // Sell price
-                        2: FlexColumnWidth(1.5), // Portions/unit
-                        3: FlexColumnWidth(2),   // Cost rise/portion
-                      },
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minWidth: 600),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Table(
+                          border: TableBorder.all(
+                              color: const Color(0xFFEEEEEE),
+                              borderRadius: BorderRadius.circular(8)),
+                          columnWidths: const {
+                            0: FlexColumnWidth(3),   // Product name
+                            1: FlexColumnWidth(1.8), // Sell price
+                            2: FlexColumnWidth(1.5), // Portions/unit
+                            3: FlexColumnWidth(2),   // Cost rise/portion
+                          },
                       children: [
                         // Header
                         TableRow(
@@ -442,6 +468,8 @@ class _ItemCard extends StatelessWidget {
                         }),
                       ],
                     ),
+                  ),
+                  ),
                   ),
                 ],
               ),

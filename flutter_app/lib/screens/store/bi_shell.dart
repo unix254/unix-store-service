@@ -27,7 +27,7 @@ class BIShell extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(28, 24, 24, 0),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                   child: Row(
                     children: [
                       Container(
@@ -43,32 +43,36 @@ class BIShell extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 14),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text(
-                            'Business Intelligence',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w800,
-                              color: Color(0xFF1A1A2E),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text(
+                              'Business Intelligence',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF1A1A2E),
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          ),
-                          Text(
-                            'Variance · Yield Config · Price Impact',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.pinMuted,
+                            Text(
+                              'Variance · Yield Config · Price Impact',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.pinMuted,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 16),
                 const TabBar(
-                  isScrollable: false,
+                  isScrollable: true,
                   indicatorColor: AppTheme.primary,
                   indicatorWeight: 3,
                   labelColor: AppTheme.primary,

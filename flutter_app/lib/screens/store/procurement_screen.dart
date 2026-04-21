@@ -123,37 +123,83 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
         // ── Header ────────────────────────────────────────────────
         Container(
           color: Colors.white,
-          padding: const EdgeInsets.fromLTRB(24, 16, 20, 14),
-          child: Row(children: [
-            const Icon(Icons.shopping_basket_rounded,
-                color: AppTheme.pinTeal, size: 26),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Column(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isMobile = constraints.maxWidth < 800;
+              return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Procurement Lists',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                  Text('Generate "things to buy" lists routed to each manager',
-                      style: TextStyle(fontSize: 12, color: AppTheme.pinMuted)),
+                  Row(children: [
+                    const Icon(Icons.shopping_basket_rounded,
+                        color: AppTheme.pinTeal, size: 26),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Procurement Lists',
+                              style: TextStyle(
+                                  fontSize: isMobile ? 18 : 18,
+                                  fontWeight: FontWeight.w700)),
+                          Text('Generate "things to buy" lists routed to each manager',
+                              style: TextStyle(
+                                  fontSize: isMobile ? 11 : 12,
+                                  color: AppTheme.pinMuted)),
+                        ],
+                      ),
+                    ),
+                    if (!isMobile) ...[
+                      IconButton(
+                          icon: const Icon(Icons.refresh_rounded),
+                          onPressed: _loadLogs,
+                          tooltip: 'Refresh logs'),
+                      const SizedBox(width: 8),
+                      FilledButton.icon(
+                        onPressed: _generating ? null : _generate,
+                        icon: _generating
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.auto_awesome_rounded, size: 18),
+                        label: Text(_generating ? 'Generating…' : 'Generate Lists'),
+                        style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.pinTeal),
+                      ),
+                    ]
+                  ]),
+                  if (isMobile) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        IconButton(
+                            icon: const Icon(Icons.refresh_rounded),
+                            onPressed: _loadLogs,
+                            tooltip: 'Refresh logs'),
+                        const SizedBox(width: 8),
+                        FilledButton.icon(
+                          onPressed: _generating ? null : _generate,
+                          icon: _generating
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white))
+                              : const Icon(Icons.auto_awesome_rounded, size: 18),
+                          label: Text(_generating ? 'Generating…' : 'Generate Lists'),
+                          style: FilledButton.styleFrom(
+                              backgroundColor: AppTheme.pinTeal),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
-              ),
-            ),
-            IconButton(
-                icon: const Icon(Icons.refresh_rounded),
-                onPressed: _loadLogs,
-                tooltip: 'Refresh logs'),
-            const SizedBox(width: 8),
-            FilledButton.icon(
-              onPressed: _generating ? null : _generate,
-              icon: _generating
-                  ? const SizedBox(width: 16, height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Icon(Icons.auto_awesome_rounded, size: 18),
-              label: Text(_generating ? 'Generating…' : 'Generate Lists'),
-              style: FilledButton.styleFrom(backgroundColor: AppTheme.pinTeal),
-            ),
-          ]),
+              );
+            },
+          ),
         ),
         const Divider(height: 1),
 
@@ -282,13 +328,16 @@ class _EditableItem {
   final double inStock;    // original from backend (0 for ad-hoc)
   final bool   isAdHoc;
   final TextEditingController qtyCtrl;
+  /// Client-side only — excluded items are hidden from toPayload() and not sent.
+  bool excluded;
 
   _EditableItem({
     required this.name,
     required this.unit,
     required double initialQty,
-    this.inStock = 0,
-    this.isAdHoc = false,
+    this.inStock  = 0,
+    this.isAdHoc  = false,
+    this.excluded = false,
   }) : qtyCtrl = TextEditingController(
           text: initialQty.toStringAsFixed(initialQty % 1 == 0 ? 0 : 1));
 
@@ -330,11 +379,16 @@ class _EditableGroup {
         name: name, unit: unit, initialQty: qty, isAdHoc: true));
   }
 
+  /// Active items = not excluded and qty > 0.
+  List<_EditableItem> get activeItems =>
+      items.where((i) => !i.excluded && i.qty > 0).toList();
+
+  int get excludedCount => items.where((i) => i.excluded).length;
+
   Map<String, dynamic> toPayload() => {
     'purchaser_name':  purchaserName,
     'purchaser_phone': purchaserPhone,
-    'items': items
-        .where((i) => i.qty > 0)
+    'items': activeItems
         .map((i) => {'name': i.name, 'unit': i.unit, 'qty': i.qty})
         .toList(),
   };
@@ -425,10 +479,23 @@ class _EditableProcurementCardState extends State<_EditableProcurementCard> {
                   ],
                 ),
               ),
-              Text('${group.items.length} item${group.items.length == 1 ? '' : 's'}',
-                  style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.w600,
-                      color: Color(0xFF4A148C))),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '${group.activeItems.length} item${group.activeItems.length == 1 ? '' : 's'}',
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w600,
+                        color: Color(0xFF4A148C)),
+                  ),
+                  if (group.excludedCount > 0)
+                    Text(
+                      '${group.excludedCount} postponed',
+                      style: const TextStyle(
+                          fontSize: 10, color: AppTheme.debtRed),
+                    ),
+                ],
+              ),
             ]),
           ),
 
@@ -437,82 +504,135 @@ class _EditableProcurementCardState extends State<_EditableProcurementCard> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Column(
               children: group.items.asMap().entries.map((entry) {
-                final i    = entry.value;
+                final i      = entry.value;
                 final isLast = entry.key == group.items.length - 1;
+                final dimColor = Colors.grey.shade400;
+
                 return Padding(
                   padding: EdgeInsets.only(bottom: isLast ? 0 : 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Icon(
-                        i.isAdHoc
-                            ? Icons.add_circle_outline_rounded
-                            : Icons.fiber_manual_record_rounded,
-                        size: i.isAdHoc ? 16 : 8,
-                        color: i.isAdHoc
-                            ? AppTheme.pinTeal
-                            : AppTheme.pinMuted,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(i.name,
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: i.isAdHoc
-                                        ? AppTheme.pinTeal
-                                        : Colors.black87)),
-                            if (!i.isAdHoc && i.inStock > 0)
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 200),
+                    opacity: i.excluded ? 0.45 : 1.0,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Icon(
+                          i.isAdHoc
+                              ? Icons.add_circle_outline_rounded
+                              : Icons.fiber_manual_record_rounded,
+                          size: i.isAdHoc ? 16 : 8,
+                          color: i.excluded
+                              ? dimColor
+                              : i.isAdHoc
+                                  ? AppTheme.pinTeal
+                                  : AppTheme.pinMuted,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
                               Text(
-                                'In stock: ${i.inStock.toStringAsFixed(i.inStock % 1 == 0 ? 0 : 1)} ${i.unit}',
-                                style: const TextStyle(
-                                    fontSize: 11, color: AppTheme.pinMuted),
+                                i.name,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: i.excluded
+                                      ? dimColor
+                                      : i.isAdHoc
+                                          ? AppTheme.pinTeal
+                                          : Colors.black87,
+                                  decoration: i.excluded
+                                      ? TextDecoration.lineThrough
+                                      : null,
+                                  decorationColor: dimColor,
+                                ),
                               ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      // Editable qty field
-                      SizedBox(
-                        width: 90,
-                        child: TextField(
-                          controller: i.qtyCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w700),
-                          decoration: InputDecoration(
-                            isDense: true,
-                            suffixText: i.unit,
-                            suffixStyle: const TextStyle(
-                                fontSize: 11, color: AppTheme.pinMuted),
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 6),
-                            border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8)),
-                            focusedBorder: OutlineInputBorder(
-                              borderSide: const BorderSide(
-                                  color: AppTheme.pinTeal, width: 2),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
+                              if (!i.isAdHoc && i.inStock > 0)
+                                Text(
+                                  'In stock: ${i.inStock.toStringAsFixed(i.inStock % 1 == 0 ? 0 : 1)} ${i.unit}',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: i.excluded
+                                          ? dimColor
+                                          : AppTheme.pinMuted),
+                                ),
+                              if (i.excluded)
+                                const Text(
+                                  'Postponed — not included in order',
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: AppTheme.debtRed,
+                                      fontStyle: FontStyle.italic),
+                                ),
+                            ],
                           ),
-                          onChanged: (_) => setState(() {}),
                         ),
-                      ),
-                      // Remove ad-hoc item
-                      if (i.isAdHoc)
-                        IconButton(
-                          icon: const Icon(Icons.remove_circle_outline_rounded,
-                              size: 18, color: AppTheme.debtRed),
-                          onPressed: () => setState(() => group.items.remove(i)),
-                          tooltip: 'Remove',
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
+                        const SizedBox(width: 8),
+                        // Qty field — disabled when excluded
+                        SizedBox(
+                          width: 90,
+                          child: TextField(
+                            controller: i.qtyCtrl,
+                            enabled: !i.excluded,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: i.excluded ? dimColor : Colors.black87),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              suffixText: i.unit,
+                              suffixStyle: const TextStyle(
+                                  fontSize: 11, color: AppTheme.pinMuted),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 6),
+                              border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                              focusedBorder: OutlineInputBorder(
+                                borderSide: const BorderSide(
+                                    color: AppTheme.pinTeal, width: 2),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            onChanged: (_) => setState(() {}),
+                          ),
                         ),
-                    ],
+                        const SizedBox(width: 4),
+                        // Exclude / Restore / Delete
+                        if (i.isAdHoc && !i.excluded)
+                          // Ad-hoc items: hard delete (same as before)
+                          IconButton(
+                            icon: const Icon(Icons.remove_circle_outline_rounded,
+                                size: 18, color: AppTheme.debtRed),
+                            onPressed: () => setState(() => group.items.remove(i)),
+                            tooltip: 'Remove',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          )
+                        else if (!i.excluded)
+                          // System-suggested items: soft exclude (postpone)
+                          IconButton(
+                            icon: const Icon(Icons.do_not_disturb_on_outlined,
+                                size: 18, color: AppTheme.debtRed),
+                            onPressed: () => setState(() => i.excluded = true),
+                            tooltip: 'Postpone — remove from this order',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          )
+                        else
+                          // Restore postponed item
+                          IconButton(
+                            icon: const Icon(Icons.undo_rounded,
+                                size: 18, color: AppTheme.paidGreen),
+                            onPressed: () => setState(() => i.excluded = false),
+                            tooltip: 'Restore — include in order',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                      ],
+                    ),
                   ),
                 );
               }).toList(),
@@ -537,10 +657,18 @@ class _EditableProcurementCardState extends State<_EditableProcurementCard> {
               const Spacer(),
               if (!hasPhone)
                 const Text('No phone — WhatsApp unavailable',
+                    style: TextStyle(fontSize: 11, color: AppTheme.debtRed))
+              else if (group.activeItems.isEmpty)
+                const Text('All items postponed — nothing to send',
                     style: TextStyle(fontSize: 11, color: AppTheme.debtRed)),
               const SizedBox(width: 8),
               OutlinedButton.icon(
-                onPressed: widget.onSend,
+                // Disable if no active items or no phone
+                onPressed: (widget.onSend != null &&
+                            hasPhone &&
+                            group.activeItems.isNotEmpty)
+                    ? widget.onSend
+                    : null,
                 icon: const Icon(Icons.phone_android_rounded,
                     size: 16, color: Color(0xFF25D366)),
                 label: const Text('Send via WhatsApp'),
