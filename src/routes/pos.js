@@ -63,7 +63,7 @@ router.get('/sales/today', async (req, res) => {
       JOIN tickets t   ON t.id = tl.ticket
       JOIN receipts r  ON r.id = t.id
       LEFT JOIN products p ON p.id = tl.product
-      WHERE DATE(r.datenew) = CURDATE()
+      WHERE r.datenew >= CURDATE() AND r.datenew < (CURDATE() + INTERVAL 1 DAY)
         AND t.tickettype = 0
       GROUP BY tl.product, p.name
       ORDER BY total_units_sold DESC
@@ -89,7 +89,7 @@ router.get('/sales/range', async (req, res) => {
       JOIN tickets t   ON t.id = tl.ticket
       JOIN receipts r  ON r.id = t.id
       LEFT JOIN products p ON p.id = tl.product
-      WHERE DATE(r.datenew) BETWEEN ? AND ?
+      WHERE r.datenew >= ? AND r.datenew < (? + INTERVAL 1 DAY)
         AND t.tickettype = 0
       GROUP BY tl.product, p.name
       ORDER BY total_units_sold DESC
@@ -164,8 +164,8 @@ function _buildVarianceQuery(salesFilter, issuesFilter) {
 router.get('/variance/today', async (req, res) => {
   try {
     const sql = _buildVarianceQuery(
-      `DATE(r.datenew - INTERVAL 7 HOUR) = DATE(NOW() - INTERVAL 7 HOUR)`,
-      `DATE(issued_at - INTERVAL 7 HOUR) = DATE(NOW() - INTERVAL 7 HOUR)`
+      `r.datenew >= (DATE(NOW() - INTERVAL 7 HOUR) + INTERVAL 7 HOUR) AND r.datenew < (DATE(NOW() - INTERVAL 7 HOUR) + INTERVAL 1 DAY + INTERVAL 7 HOUR)`,
+      `issued_at >= (DATE(NOW() - INTERVAL 7 HOUR) + INTERVAL 7 HOUR) AND issued_at < (DATE(NOW() - INTERVAL 7 HOUR) + INTERVAL 1 DAY + INTERVAL 7 HOUR)`
     );
     const rows = await query(sql);
     res.json(rows);
@@ -185,8 +185,8 @@ router.get('/variance/range', async (req, res) => {
   }
   try {
     const sql = _buildVarianceQuery(
-      `DATE(r.datenew - INTERVAL 7 HOUR) BETWEEN ? AND ?`,
-      `DATE(issued_at - INTERVAL 7 HOUR) BETWEEN ? AND ?`
+      `r.datenew >= (? + INTERVAL 7 HOUR) AND r.datenew < (? + INTERVAL 1 DAY + INTERVAL 7 HOUR)`,
+      `issued_at >= (? + INTERVAL 7 HOUR) AND issued_at < (? + INTERVAL 1 DAY + INTERVAL 7 HOUR)`
     );
     // Each subquery needs from + to params → 4 params total
     const rows = await query(sql, [from, to, from, to]);
@@ -218,7 +218,8 @@ router.get('/issues-cost/today', async (req, res) => {
       JOIN store_inventory i ON i.id = r.inventory_item_id
       WHERE r.status = 'Issued'
         AND r.inventory_item_id IS NOT NULL
-        AND DATE(r.issued_at - INTERVAL 7 HOUR) = DATE(NOW() - INTERVAL 7 HOUR)
+        AND r.issued_at >= (DATE(NOW() - INTERVAL 7 HOUR) + INTERVAL 7 HOUR) 
+        AND r.issued_at < (DATE(NOW() - INTERVAL 7 HOUR) + INTERVAL 1 DAY + INTERVAL 7 HOUR)
     `);
     res.json(rows[0] ?? { total_cost_kes: 0, total_issues: 0 });
   } catch (err) {
