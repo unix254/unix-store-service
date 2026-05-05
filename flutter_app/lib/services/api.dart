@@ -118,8 +118,14 @@ class ApiService {
     await _delete('/api/suppliers/$id');
   }
 
-  Future<List<LedgerEntry>> getSupplierLedger(String supplierId) async {
-    final data = await _get('/api/suppliers/$supplierId/ledger');
+  Future<List<LedgerEntry>> getSupplierLedger(
+      String supplierId, {String? from, String? to}) async {
+    String path = '/api/suppliers/$supplierId/ledger';
+    final params = <String>[];
+    if (from != null) params.add('from=$from');
+    if (to   != null) params.add('to=$to');
+    if (params.isNotEmpty) path += '?${params.join('&')}';
+    final data = await _get(path);
     return (data as List).map((e) => LedgerEntry.fromJson(e)).toList();
   }
 
@@ -159,8 +165,15 @@ class ApiService {
     return data as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> getSupplierStatementWhatsApp(String supplierId, {int days = 30}) async {
-    final data = await _get('/api/suppliers/$supplierId/statement/whatsapp?days=$days');
+  Future<Map<String, dynamic>> getSupplierStatementWhatsApp(
+      String supplierId, {int days = 30, String? from, String? to}) async {
+    String path = '/api/suppliers/$supplierId/statement/whatsapp';
+    if (from != null && to != null) {
+      path += '?from=$from&to=$to';
+    } else {
+      path += '?days=$days';
+    }
+    final data = await _get(path);
     return data as Map<String, dynamic>;
   }
 
@@ -327,6 +340,16 @@ class ApiService {
   Future<List<Map<String, dynamic>>> getVarianceToday() async {
     final data = await _get('/api/pos/variance/today');
     return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<List<Map<String, dynamic>>> getVarianceRange(String from, String to) async {
+    final data = await _get('/api/pos/variance/range?from=$from&to=$to');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> getIssuedCostToday() async {
+    final data = await _get('/api/pos/issues-cost/today');
+    return data as Map<String, dynamic>;
   }
 
   // ── Inventory (M6 additions) ────────────────────────────────

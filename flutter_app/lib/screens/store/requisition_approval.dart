@@ -31,6 +31,10 @@ class _RequisitionApprovalScreenState
   int _pollCountdown = 30;
   Timer? _countdownTimer;
 
+  // KPI: total KES value of all issued items in today's 7 AM business day.
+  double _issuedCostToday = 0.0;
+  int _issuedCountToday = 0;
+
   static const _filters = ['Pending', 'All', 'Issued', 'Rejected'];
 
   @override
@@ -48,34 +52,58 @@ class _RequisitionApprovalScreenState
   }
 
   void _startPolling() {
-    // Auto-refresh every 30 seconds
-    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted) _loadRequisitions();
+    // Reduced from 30 s → 30 min: requisitions are infrequent events.
+    _pollTimer = Timer.periodic(const Duration(minutes: 30), (_) {
+      if (mounted) _backgroundPoll();
     });
-    // Countdown ticker for UI indicator
-    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+    // Countdown ticks every minute — shows minutes remaining until next auto-refresh.
+    _countdownTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (!mounted) return;
       setState(() {
-        _pollCountdown =
-            30 - (DateTime.now().second % 30);
+        _pollCountdown = 30 - (DateTime.now().minute % 30);
       });
     });
   }
 
+  // User-triggered refresh: shows loading spinner and error snackbars.
   Future<void> _loadRequisitions() async {
     setState(() => _loading = true);
     try {
-      final list = await ApiService.instance.getRequisitions();
-      setState(() {
-        _all = list;
-        _loading = false;
-        _lastRefresh = DateTime.now();
-        _pollCountdown = 30;
-      });
+      await _fetchAndApply();
     } catch (e) {
       setState(() => _loading = false);
       _showError(e.toString());
     }
+  }
+
+  // Background timer refresh: silent on network errors so a brief dropout
+  // doesn't disrupt the UI with a red error banner.
+  Future<void> _backgroundPoll() async {
+    try {
+      await _fetchAndApply(background: true);
+    } catch (_) {
+      // Silently swallow network/socket errors from background polling.
+    }
+  }
+
+  Future<void> _fetchAndApply({bool background = false}) async {
+    final results = await Future.wait([
+      ApiService.instance.getRequisitions(),
+      ApiService.instance.getIssuedCostToday(),
+    ]);
+    final list = results[0] as List<Requisition>;
+    final cost = results[1] as Map<String, dynamic>;
+    if (!mounted) return;
+    setState(() {
+      _all = list;
+      _issuedCostToday  = double.tryParse(
+              cost['total_cost_kes']?.toString() ?? '0') ?? 0.0;
+      _issuedCountToday = int.tryParse(
+              cost['total_issues']?.toString() ?? '0') ?? 0;
+      _loading       = false;
+      _lastRefresh   = DateTime.now();
+      _pollCountdown = 30;
+    });
   }
 
   List<Requisition> get _filtered {
@@ -178,6 +206,13 @@ class _RequisitionApprovalScreenState
           pollCountdown:  _pollCountdown,
           onRefresh:      _loadRequisitions,
         ),
+        // ── KPI Card ─────────────────────────────────────────
+        if (!_loading)
+          _IssuedCostKpiCard(
+            totalCostKes:  _issuedCostToday,
+            issuedCount:   _issuedCountToday,
+          ),
+
         // ── Filter Tabs ──────────────────────────────────────
         _FilterTabs(
           filters:  _filters,
@@ -214,6 +249,85 @@ class _RequisitionApprovalScreenState
                     ),
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issued Cost KPI Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _IssuedCostKpiCard extends StatelessWidget {
+  final double totalCostKes;
+  final int issuedCount;
+  const _IssuedCostKpiCard({
+    required this.totalCostKes,
+    required this.issuedCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final kes = NumberFormat.currency(
+        locale: 'en_KE', symbol: 'KES ', decimalDigits: 0);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF4A148C), Color(0xFF7B1FA2)],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF7B1FA2).withOpacity(0.25),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.moving_rounded, color: Colors.white70, size: 32),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Total Cost Issued Today',
+                    style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500)),
+                const SizedBox(height: 2),
+                Text(
+                  kes.format(totalCostKes),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '$issuedCount issues',
+                style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500),
+              ),
+              const Text('7 AM business day',
+                  style: TextStyle(color: Colors.white54, fontSize: 11)),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -308,8 +422,8 @@ class _PollIndicator extends StatelessWidget {
             color: AppTheme.primary,
           ),
           Text(
-            '$countdown',
-            style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700),
+            '${countdown}m',
+            style: const TextStyle(fontSize: 8, fontWeight: FontWeight.w700),
           ),
         ],
       ),

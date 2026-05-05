@@ -86,22 +86,29 @@ router.delete('/:id', async (req, res) => {
 // ── Ledger sub-routes ────────────────────────────────────────
 
 // GET /api/suppliers/:id/ledger  – full transaction history + running balance
+// Optional: ?from=YYYY-MM-DD&to=YYYY-MM-DD to filter by date range.
 // Joins related_supplier_id → name so the UI can show "Paid to [Supplier X]".
 router.get('/:id/ledger', async (req, res) => {
+  const { from, to } = req.query;
   try {
-    const entries = await query(
-      `SELECT l.*,
-              rs.name AS related_supplier_name
-       FROM store_supplier_ledger l
-       LEFT JOIN store_suppliers rs ON rs.id = l.related_supplier_id
-       WHERE l.supplier_id = ?
-       ORDER BY l.transaction_date, l.created_at`,
-      [req.params.id]
-    );
+    let sql = `
+      SELECT l.*,
+             rs.name AS related_supplier_name
+      FROM store_supplier_ledger l
+      LEFT JOIN store_suppliers rs ON rs.id = l.related_supplier_id
+      WHERE l.supplier_id = ?
+    `;
+    const params = [req.params.id];
+    if (from) { sql += ' AND l.transaction_date >= ?'; params.push(from); }
+    if (to)   { sql += ' AND l.transaction_date <= ?'; params.push(to); }
+    sql += ' ORDER BY l.transaction_date, l.created_at';
+
+    const entries = await query(sql, params);
     let balance = 0;
     const withBalance = entries.map(e => {
-      // PURCHASE, SUPPLIER_PAYMENT, and OTHER_EXPENSE all increase the account's spend (debit)
-      const isDebit = e.transaction_type === 'PURCHASE' || e.transaction_type === 'SUPPLIER_PAYMENT' || e.transaction_type === 'OTHER_EXPENSE';
+      const isDebit = e.transaction_type === 'PURCHASE'
+                   || e.transaction_type === 'SUPPLIER_PAYMENT'
+                   || e.transaction_type === 'OTHER_EXPENSE';
       balance += isDebit ? Number(e.amount) : -Number(e.amount);
       return { ...e, running_balance: Number(balance.toFixed(2)) };
     });
@@ -148,12 +155,21 @@ router.get('/:id/statement', async (req, res) => {
     if (!supplier.length) return res.status(404).json({ error: 'Supplier not found' });
     const s = supplier[0];
 
-    const days = parseInt(req.query.days, 10) || 30;
     const today = new Date();
-    const periodStart = new Date(today);
-    periodStart.setDate(today.getDate() - days);
-    const periodStartStr = periodStart.toISOString().slice(0, 10);
     const todayStr = today.toISOString().slice(0, 10);
+    // Accept explicit from/to date params; fall back to days-based window.
+    let periodStartStr, days;
+    if (req.query.from && req.query.to) {
+      periodStartStr = req.query.from;
+      const toStr    = req.query.to <= todayStr ? req.query.to : todayStr;
+      days = Math.ceil((new Date(toStr) - new Date(periodStartStr)) / 86400000) + 1;
+    } else {
+      days = parseInt(req.query.days, 10) || 30;
+      const periodStart = new Date(today);
+      periodStart.setDate(today.getDate() - days);
+      periodStartStr = periodStart.toISOString().slice(0, 10);
+    }
+    const endStr = req.query.to && req.query.to <= todayStr ? req.query.to : todayStr;
 
     // Opening balance: all transactions BEFORE the period
     const openRows = await query(
@@ -175,7 +191,7 @@ router.get('/:id/statement', async (req, res) => {
        WHERE l.supplier_id = ?
          AND l.transaction_date >= ? AND l.transaction_date <= ?
        ORDER BY l.transaction_date, l.created_at`,
-      [req.params.id, periodStartStr, todayStr]
+      [req.params.id, periodStartStr, endStr]
     );
 
     let purchases = 0, supplierPayments = 0, otherExpenses = 0, payments = 0, cashIns = 0;
@@ -200,7 +216,7 @@ router.get('/:id/statement', async (req, res) => {
 
     res.json({
       supplier: { id: s.id, name: s.name, phone: s.phone, is_internal: !!s.is_internal },
-      period: { start: periodStartStr, end: todayStr, days },
+      period: { start: periodStartStr, end: endStr, days },
       opening_balance:          Number(openingBalance.toFixed(2)),
       period_purchases:         Number(purchases.toFixed(2)),
       period_supplier_payments: Number(supplierPayments.toFixed(2)),
@@ -221,21 +237,28 @@ router.get('/:id/statement', async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 // GET /api/suppliers/:id/statement/whatsapp
 // Generates a formatted WhatsApp mini-statement URL.
-// Query params: ?days=30
+// Query params: ?days=30  OR  ?from=YYYY-MM-DD&to=YYYY-MM-DD
 // ─────────────────────────────────────────────────────────────
 router.get('/:id/statement/whatsapp', async (req, res) => {
   try {
-    const days = parseInt(req.query.days, 10) || 30;
-    // Reuse the statement logic by fetching from same DB
     const supplier = await query('SELECT * FROM store_suppliers WHERE id = ?', [req.params.id]);
     if (!supplier.length) return res.status(404).json({ error: 'Supplier not found' });
     const s = supplier[0];
 
     const today = new Date();
-    const periodStart = new Date(today);
-    periodStart.setDate(today.getDate() - days);
-    const periodStartStr = periodStart.toISOString().slice(0, 10);
     const todayStr = today.toISOString().slice(0, 10);
+    let periodStartStr, endStr, days;
+    if (req.query.from && req.query.to) {
+      periodStartStr = req.query.from;
+      endStr = req.query.to <= todayStr ? req.query.to : todayStr;
+      days = Math.ceil((new Date(endStr) - new Date(periodStartStr)) / 86400000) + 1;
+    } else {
+      days = parseInt(req.query.days, 10) || 30;
+      const periodStart = new Date(today);
+      periodStart.setDate(today.getDate() - days);
+      periodStartStr = periodStart.toISOString().slice(0, 10);
+      endStr = todayStr;
+    }
 
     const openRows = await query(
       `SELECT
@@ -251,7 +274,7 @@ router.get('/:id/statement/whatsapp', async (req, res) => {
     const periodRows = await query(
       `SELECT transaction_type, amount FROM store_supplier_ledger
        WHERE supplier_id = ? AND transaction_date >= ? AND transaction_date <= ?`,
-      [req.params.id, periodStartStr, todayStr]
+      [req.params.id, periodStartStr, endStr]
     );
 
     let purchases = 0, supplierPayments = 0, otherExpenses = 0, payments = 0, cashIns = 0;
@@ -273,7 +296,7 @@ router.get('/:id/statement/whatsapp', async (req, res) => {
     const slogan  = sm['slogan']  || 'Powered by Yunix';
 
     const fmt = (n) => `KES ${Math.abs(n).toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
-    const periodLabel = `${periodStartStr} to ${todayStr}`;
+    const periodLabel = `${periodStartStr} to ${endStr}`;
 
     // Build mini-statement message (WhatsApp-friendly)
     const isInternal = !!s.is_internal;

@@ -1,8 +1,78 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../config/theme.dart';
 import '../../services/api.dart';
+
+// ── Period enum ────────────────────────────────────────────────────────────────
+
+enum _Period { today, yesterday, thisWeek, lastWeek, custom }
+
+extension _PeriodLabel on _Period {
+  String get label {
+    switch (this) {
+      case _Period.today:     return 'Today';
+      case _Period.yesterday: return 'Yesterday';
+      case _Period.thisWeek:  return 'This Week';
+      case _Period.lastWeek:  return 'Last Week';
+      case _Period.custom:    return 'Custom';
+    }
+  }
+}
+
+// ── Business-day helpers ───────────────────────────────────────────────────────
+
+// Shift by 7 hours so that 2 AM Wednesday counts as Tuesday's business day.
+DateTime _businessDay(DateTime dt) {
+  final shifted = dt.subtract(const Duration(hours: 7));
+  return DateTime(shifted.year, shifted.month, shifted.day);
+}
+
+String _fmtDate(DateTime d) =>
+    '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+// Returns (from, to) business-date strings for the given period.
+({String from, String to, String title}) _periodDates(
+    _Period period, DateTimeRange? custom) {
+  final today = _businessDay(DateTime.now());
+
+  switch (period) {
+    case _Period.today:
+      return (from: _fmtDate(today), to: _fmtDate(today), title: 'Today');
+    case _Period.yesterday:
+      final y = today.subtract(const Duration(days: 1));
+      return (from: _fmtDate(y), to: _fmtDate(y), title: 'Yesterday');
+    case _Period.thisWeek:
+      final start = today.subtract(Duration(days: today.weekday - 1));
+      return (
+        from:  _fmtDate(start),
+        to:    _fmtDate(today),
+        title: 'This Week',
+      );
+    case _Period.lastWeek:
+      final thisMonday = today.subtract(Duration(days: today.weekday - 1));
+      final lastMonday = thisMonday.subtract(const Duration(days: 7));
+      final lastSunday = thisMonday.subtract(const Duration(days: 1));
+      return (
+        from:  _fmtDate(lastMonday),
+        to:    _fmtDate(lastSunday),
+        title: 'Last Week',
+      );
+    case _Period.custom:
+      if (custom == null) {
+        return (from: _fmtDate(today), to: _fmtDate(today), title: 'Custom');
+      }
+      final f = _businessDay(custom.start);
+      final t = _businessDay(custom.end);
+      final display = DateFormat('d MMM');
+      return (
+        from:  _fmtDate(f),
+        to:    _fmtDate(t),
+        title: '${display.format(f)} – ${display.format(t)}',
+      );
+  }
+}
+
+// ── Screen ─────────────────────────────────────────────────────────────────────
 
 class VarianceScreen extends StatefulWidget {
   const VarianceScreen({super.key});
@@ -16,27 +86,22 @@ class _VarianceScreenState extends State<VarianceScreen> {
   bool _loading = true;
   String? _error;
   DateTime? _lastRefreshed;
-  Timer? _autoRefresh;
+
+  _Period _period = _Period.today;
+  DateTimeRange? _customRange;
 
   @override
   void initState() {
     super.initState();
     _load();
-    // Auto-refresh every 60 seconds
-    _autoRefresh = Timer.periodic(const Duration(seconds: 60), (_) => _load());
-  }
-
-  @override
-  void dispose() {
-    _autoRefresh?.cancel();
-    super.dispose();
   }
 
   Future<void> _load() async {
     if (!mounted) return;
     setState(() { _loading = true; _error = null; });
     try {
-      _rows = await ApiService.instance.getVarianceToday();
+      final pd = _periodDates(_period, _customRange);
+      _rows = await ApiService.instance.getVarianceRange(pd.from, pd.to);
       if (!mounted) return;
       setState(() {
         _lastRefreshed = DateTime.now();
@@ -51,6 +116,43 @@ class _VarianceScreenState extends State<VarianceScreen> {
     }
   }
 
+  Future<void> _pickCustomRange() async {
+    final initial = _customRange ??
+        DateTimeRange(
+          start: DateTime.now().subtract(const Duration(days: 6)),
+          end:   DateTime.now(),
+        );
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2024),
+      lastDate:  DateTime.now(),
+      initialDateRange: initial,
+      helpText: 'Select variance date range',
+      saveText: 'Apply',
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(primary: AppTheme.pinTeal),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked == null) return;
+    setState(() {
+      _customRange = picked;
+      _period = _Period.custom;
+    });
+    _load();
+  }
+
+  void _selectPeriod(_Period p) {
+    if (p == _Period.custom) {
+      _pickCustomRange();
+      return;
+    }
+    setState(() => _period = p);
+    _load();
+  }
+
   double _v(Map<String, dynamic> r, String key) =>
       double.tryParse(r[key]?.toString() ?? '0') ?? 0.0;
 
@@ -59,27 +161,28 @@ class _VarianceScreenState extends State<VarianceScreen> {
     final overIssued  = _rows.where((r) => _v(r, 'variance_qty') > 0.05).length;
     final underIssued = _rows.where((r) => _v(r, 'variance_qty') < -0.05).length;
     final onTrack     = _rows.length - overIssued - underIssued;
+    final pd          = _periodDates(_period, _customRange);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Header ────────────────────────────────────────────────
         _VarianceHeader(
+          periodTitle:   pd.title,
           lastRefreshed: _lastRefreshed,
-          loading: _loading,
-          onRefresh: _load,
+          loading:       _loading,
+          onRefresh:     _load,
+          selectedPeriod: _period,
+          onPeriodChange: _selectPeriod,
         ),
 
-        // ── Summary bar ───────────────────────────────────────────
         if (!_loading && _error == null && _rows.isNotEmpty)
           _SummaryBar(
-            total: _rows.length,
-            overIssued: overIssued,
+            total:       _rows.length,
+            overIssued:  overIssued,
             underIssued: underIssued,
-            onTrack: onTrack,
+            onTrack:     onTrack,
           ),
 
-        // ── Content ────────────────────────────────────────────────
         Expanded(
           child: _loading
               ? const Center(child: CircularProgressIndicator())
@@ -94,32 +197,39 @@ class _VarianceScreenState extends State<VarianceScreen> {
   }
 }
 
-// ── Header ─────────────────────────────────────────────────────────────────
+// ── Header ─────────────────────────────────────────────────────────────────────
 
 class _VarianceHeader extends StatelessWidget {
+  final String periodTitle;
   final DateTime? lastRefreshed;
   final bool loading;
   final VoidCallback onRefresh;
+  final _Period selectedPeriod;
+  final void Function(_Period) onPeriodChange;
 
   const _VarianceHeader({
+    required this.periodTitle,
     required this.lastRefreshed,
     required this.loading,
     required this.onRefresh,
+    required this.selectedPeriod,
+    required this.onPeriodChange,
   });
 
   @override
   Widget build(BuildContext context) {
     final fmt = DateFormat('HH:mm:ss');
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(bottom: BorderSide(color: Color(0xFFE0E0E0))),
       ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final isMobile = constraints.maxWidth < 800;
-          final titleWidget = Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Title row
+          Row(
             children: [
               const Icon(Icons.analytics_rounded,
                   color: AppTheme.pinTeal, size: 26),
@@ -128,63 +238,112 @@ class _VarianceHeader extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Usage Variance — Today',
-                        style: TextStyle(
+                    Text('Usage Variance — $periodTitle',
+                        style: const TextStyle(
                             fontSize: 18, fontWeight: FontWeight.w700)),
                     if (lastRefreshed != null)
-                      Text('Last refreshed: ${fmt.format(lastRefreshed!)}  ·  Auto-refresh every 60s',
-                          style: const TextStyle(
-                              fontSize: 12, color: AppTheme.pinMuted)),
+                      Text(
+                        'Last refreshed: ${fmt.format(lastRefreshed!)}',
+                        style: const TextStyle(
+                            fontSize: 12, color: AppTheme.pinMuted),
+                      ),
                   ],
                 ),
               ),
-            ],
-          );
-          final actionWidget = Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              _LegendChip(color: AppTheme.debtRed,   label: 'Over-Issued (loss risk)'),
-              _LegendChip(color: AppTheme.paidGreen, label: 'Under-Issued (saved)'),
-              const SizedBox(width: 8),
-              FilledButton.icon(
-                onPressed: loading ? null : onRefresh,
-                icon: loading
-                    ? const SizedBox(
-                        width: 14, height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2,
-                            color: Colors.white))
-                    : const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Refresh'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.pinTeal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                ),
+              const SizedBox(width: 12),
+              Wrap(
+                spacing: 8,
+                children: [
+                  _LegendChip(color: AppTheme.debtRed,   label: 'Over-Issued'),
+                  _LegendChip(color: AppTheme.paidGreen, label: 'Under-Issued'),
+                  IconButton(
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: const Row(
+                            children: [
+                              Icon(Icons.picture_as_pdf_rounded,
+                                  color: Colors.white, size: 18),
+                              SizedBox(width: 10),
+                              Text('PDF Report generation coming soon.',
+                                  style: TextStyle(fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                          backgroundColor: AppTheme.pinTeal,
+                          behavior: SnackBarBehavior.floating,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                          duration: const Duration(seconds: 3),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.picture_as_pdf_rounded,
+                        color: AppTheme.pinTeal),
+                    tooltip: 'Download PDF (coming soon)',
+                  ),
+                  FilledButton.icon(
+                    onPressed: loading ? null : onRefresh,
+                    icon: loading
+                        ? const SizedBox(
+                            width: 14, height: 14,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('Refresh'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.pinTeal,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                    ),
+                  ),
+                ],
               ),
             ],
-          );
-
-          if (isMobile) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                titleWidget,
-                const SizedBox(height: 12),
-                actionWidget,
-              ],
-            );
-          } else {
-            return Row(
-              children: [
-                Expanded(child: titleWidget),
-                const SizedBox(width: 16),
-                actionWidget,
-              ],
-            );
-          }
-        },
+          ),
+          const SizedBox(height: 12),
+          // Period selector
+          _PeriodSelector(
+            selected:  selectedPeriod,
+            onChange:  onPeriodChange,
+          ),
+        ],
       ),
+    );
+  }
+}
+
+// ── Period selector ─────────────────────────────────────────────────────────────
+
+class _PeriodSelector extends StatelessWidget {
+  final _Period selected;
+  final void Function(_Period) onChange;
+
+  const _PeriodSelector({required this.selected, required this.onChange});
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: _Period.values.map((p) {
+        final isSelected = selected == p;
+        return ChoiceChip(
+          label: Text(p.label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: isSelected ? Colors.white : AppTheme.pinMuted,
+              )),
+          selected: isSelected,
+          selectedColor: AppTheme.pinTeal,
+          backgroundColor: const Color(0xFFF5F5F5),
+          side: BorderSide(
+            color: isSelected ? AppTheme.pinTeal : const Color(0xFFDDDDDD),
+          ),
+          onSelected: (_) => onChange(p),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        );
+      }).toList(),
     );
   }
 }
@@ -197,21 +356,20 @@ class _LegendChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(
         children: [
-          Container(width: 12, height: 12,
+          Container(
+              width: 12, height: 12,
               decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
           const SizedBox(width: 5),
-          Text(label, style: const TextStyle(fontSize: 11, color: AppTheme.pinMuted)),
+          Text(label,
+              style: const TextStyle(fontSize: 11, color: AppTheme.pinMuted)),
         ],
       );
 }
 
-// ── Summary Bar ────────────────────────────────────────────────────────────
+// ── Summary Bar ────────────────────────────────────────────────────────────────
 
 class _SummaryBar extends StatelessWidget {
-  final int total;
-  final int overIssued;
-  final int underIssued;
-  final int onTrack;
+  final int total, overIssued, underIssued, onTrack;
   const _SummaryBar({
     required this.total,
     required this.overIssued,
@@ -244,8 +402,7 @@ class _SummaryBar extends StatelessWidget {
 }
 
 class _StatChip extends StatelessWidget {
-  final String label;
-  final String value;
+  final String label, value;
   final Color color;
   const _StatChip({required this.label, required this.value, required this.color});
 
@@ -273,7 +430,7 @@ class _StatChip extends StatelessWidget {
   }
 }
 
-// ── Variance Table ─────────────────────────────────────────────────────────
+// ── Variance Table ─────────────────────────────────────────────────────────────
 
 class _VarianceTable extends StatelessWidget {
   final List<Map<String, dynamic>> rows;
@@ -299,15 +456,16 @@ class _VarianceTable extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: const Color(0xFF90CAF9)),
             ),
-            child: Row(
-              children: const [
+            child: const Row(
+              children: [
                 Icon(Icons.info_outline_rounded, color: Colors.blue, size: 18),
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     'Variance = Actual Issues − Expected Issues.  '
                     'Positive (red) = more stock issued than POS sales justify — possible waste or loss.  '
-                    'Negative (green) = less issued than expected — possible under-portioning or carry-over stock.',
+                    'Negative (green) = less issued than expected — possible under-portioning or carry-over stock.  '
+                    'Business day runs 7 AM – 7 AM.',
                     style: TextStyle(fontSize: 12, color: Color(0xFF1565C0)),
                   ),
                 ),
@@ -315,7 +473,6 @@ class _VarianceTable extends StatelessWidget {
             ),
           ),
 
-          // Table
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: ConstrainedBox(
@@ -328,73 +485,73 @@ class _VarianceTable extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   columnWidths: const {
-                    0: FlexColumnWidth(2.2),   // POS Product
-                    1: FlexColumnWidth(2.0),   // Store Item
-                    2: FlexColumnWidth(1.2),   // Expected Issues
-                    3: FlexColumnWidth(1.2),   // Actual Issues
-                    4: FlexColumnWidth(1.2),   // Variance
-                    5: FlexColumnWidth(0.9),   // UOM
+                    0: FlexColumnWidth(2.2),
+                    1: FlexColumnWidth(2.0),
+                    2: FlexColumnWidth(1.2),
+                    3: FlexColumnWidth(1.2),
+                    4: FlexColumnWidth(1.2),
+                    5: FlexColumnWidth(0.9),
                   },
-              children: [
-                // Header row
-                TableRow(
-                  decoration: const BoxDecoration(color: Color(0xFF37474F)),
                   children: [
-                    _TH('POS Product(s)'),
-                    _TH('Store Item'),
-                    _TH('Expected Issues'),
-                    _TH('Actual Issues'),
-                    _TH('Variance'),
-                    _TH('UOM'),
+                    TableRow(
+                      decoration: const BoxDecoration(color: Color(0xFF37474F)),
+                      children: [
+                        _TH('POS Product(s)'),
+                        _TH('Store Item'),
+                        _TH('Expected Issues'),
+                        _TH('Actual Issues'),
+                        _TH('Variance'),
+                        _TH('UOM'),
+                      ],
+                    ),
+                    ...rows.asMap().entries.map((entry) {
+                      final i = entry.key;
+                      final r = entry.value;
+                      final variance = vFn(r, 'variance_qty');
+                      final isOver  = variance > 0.05;
+                      final isUnder = variance < -0.05;
+
+                      final rowBg = isOver
+                          ? AppTheme.debtRed.withOpacity(0.07)
+                          : isUnder
+                              ? AppTheme.paidGreen.withOpacity(0.07)
+                              : (i.isEven
+                                  ? Colors.white
+                                  : const Color(0xFFFAFAFA));
+
+                      final varianceColor = isOver
+                          ? AppTheme.debtRed
+                          : isUnder
+                              ? AppTheme.paidGreen
+                              : Colors.grey.shade600;
+
+                      return TableRow(
+                        decoration: BoxDecoration(color: rowBg),
+                        children: [
+                          _TD(r['pos_product_name']?.toString() ?? '—'),
+                          _TD(r['inventory_item_name']?.toString() ?? '—'),
+                          _TD(fmt.format(vFn(r, 'expected_consumption'))),
+                          _TD(fmt.format(vFn(r, 'actual_issued'))),
+                          _TDColored(
+                            value: (variance >= 0 ? '+' : '') +
+                                fmt.format(variance),
+                            color: varianceColor,
+                            bold: isOver || isUnder,
+                            icon: isOver
+                                ? Icons.arrow_upward_rounded
+                                : isUnder
+                                    ? Icons.arrow_downward_rounded
+                                    : null,
+                          ),
+                          _TD(r['unit_of_measure']?.toString() ?? '—',
+                              muted: true),
+                        ],
+                      );
+                    }),
                   ],
                 ),
-                // Data rows
-                ...rows.asMap().entries.map((entry) {
-                  final i = entry.key;
-                  final r = entry.value;
-                  final variance = vFn(r, 'variance_qty');
-                  final isOver  = variance > 0.05;
-                  final isUnder = variance < -0.05;
-
-                  final rowBg = isOver
-                      ? AppTheme.debtRed.withOpacity(0.07)
-                      : isUnder
-                          ? AppTheme.paidGreen.withOpacity(0.07)
-                          : (i.isEven ? Colors.white : const Color(0xFFFAFAFA));
-
-                  final varianceColor = isOver
-                      ? AppTheme.debtRed
-                      : isUnder
-                          ? AppTheme.paidGreen
-                          : Colors.grey.shade600;
-
-                  return TableRow(
-                    decoration: BoxDecoration(color: rowBg),
-                    children: [
-                      _TD(r['pos_product_name']?.toString() ?? '—'),
-                      _TD(r['inventory_item_name']?.toString() ?? '—'),
-                      _TD(fmt.format(vFn(r, 'expected_consumption'))),
-                      _TD(fmt.format(vFn(r, 'actual_issued'))),
-                      _TDColored(
-                        value: (variance >= 0 ? '+' : '') +
-                            fmt.format(variance),
-                        color: varianceColor,
-                        bold: isOver || isUnder,
-                        icon: isOver
-                            ? Icons.arrow_upward_rounded
-                            : isUnder
-                                ? Icons.arrow_downward_rounded
-                                : null,
-                      ),
-                      _TD(r['unit_of_measure']?.toString() ?? '—',
-                          muted: true),
-                    ],
-                  );
-                }),
-              ],
+              ),
             ),
-          ),
-          ),
           ),
         ],
       ),
@@ -402,7 +559,7 @@ class _VarianceTable extends StatelessWidget {
   }
 }
 
-// ── Table cell helpers ─────────────────────────────────────────────────────
+// ── Table cell helpers ─────────────────────────────────────────────────────────
 
 Widget _TH(String text) => Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -446,7 +603,7 @@ Widget _TDColored({
       ),
     );
 
-// ── Empty / Error states ───────────────────────────────────────────────────
+// ── Empty / Error states ───────────────────────────────────────────────────────
 
 class _EmptyState extends StatelessWidget {
   const _EmptyState();

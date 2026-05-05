@@ -72,6 +72,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
   int get _reorderCount => _items.where((i) => i.needsReorder).length;
 
+  // Sum of quantity_in_stock × cost_per_unit for all items that have a cost set.
+  double get _totalCapital => _items.fold(0.0, (sum, item) {
+        final cost = item.costPerUnit ?? 0.0;
+        return sum + item.quantityInStock * cost;
+      });
+
   void _showError(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -177,6 +183,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
           onCycleCount:         _startCycleCount,
         ),
 
+        // ── KPI Card ──────────────────────────────────────────
+        if (!_loading)
+          _CapitalKpiCard(totalCapital: _totalCapital, itemCount: _items.length),
+
         // ── Search + Filter bar ────────────────────────────────
         _FilterBar(
           categories:       _categories,
@@ -209,6 +219,82 @@ class _InventoryScreenState extends State<InventoryScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Header
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ── Capital KPI Card ──────────────────────────────────────────────────────────
+
+class _CapitalKpiCard extends StatelessWidget {
+  final double totalCapital;
+  final int itemCount;
+  const _CapitalKpiCard({required this.totalCapital, required this.itemCount});
+
+  @override
+  Widget build(BuildContext context) {
+    final itemsWithCost = itemCount;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF006064), AppTheme.pinTeal],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.pinTeal.withOpacity(0.25),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.account_balance_wallet_rounded,
+              color: Colors.white70, size: 32),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Total Inventory Capital',
+                    style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500)),
+                const SizedBox(height: 2),
+                Text(
+                  _kes.format(totalCapital),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '$itemsWithCost items',
+                style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500),
+              ),
+              const Text('in stock',
+                  style: TextStyle(color: Colors.white54, fontSize: 11)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Inventory Header ──────────────────────────────────────────────────────────
 
 class _InventoryHeader extends StatelessWidget {
   final int totalItems;

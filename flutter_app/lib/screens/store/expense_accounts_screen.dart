@@ -10,6 +10,50 @@ import '../../services/api.dart';
 final _kes     = NumberFormat.currency(locale: 'en_KE', symbol: 'KES ', decimalDigits: 2);
 final _dateFmt = DateFormat('dd MMM yyyy');
 
+// ── Ledger period filter ───────────────────────────────────────────────────────
+
+enum _LedgerPeriod { thisMonth, lastMonth, last90, allTime, custom }
+
+extension _LedgerPeriodLabel on _LedgerPeriod {
+  String get label {
+    switch (this) {
+      case _LedgerPeriod.thisMonth:  return 'This Month';
+      case _LedgerPeriod.lastMonth:  return 'Last Month';
+      case _LedgerPeriod.last90:     return 'Last 90 Days';
+      case _LedgerPeriod.allTime:    return 'All Time';
+      case _LedgerPeriod.custom:     return 'Custom';
+    }
+  }
+}
+
+String _fmtDate(DateTime d) =>
+    '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+({String? from, String? to, String label}) _ledgerPeriodDates(
+    _LedgerPeriod period, DateTimeRange? custom) {
+  final now = DateTime.now();
+  switch (period) {
+    case _LedgerPeriod.thisMonth:
+      return (from: _fmtDate(DateTime(now.year, now.month, 1)), to: _fmtDate(now),
+              label: DateFormat('MMM yyyy').format(now));
+    case _LedgerPeriod.lastMonth:
+      final first = DateTime(now.year, now.month - 1, 1);
+      final last  = DateTime(now.year, now.month, 0);
+      return (from: _fmtDate(first), to: _fmtDate(last),
+              label: DateFormat('MMM yyyy').format(first));
+    case _LedgerPeriod.last90:
+      return (from: _fmtDate(now.subtract(const Duration(days: 89))),
+              to: _fmtDate(now), label: 'Last 90 Days');
+    case _LedgerPeriod.allTime:
+      return (from: null, to: null, label: 'All Time');
+    case _LedgerPeriod.custom:
+      if (custom == null) return (from: null, to: null, label: 'Custom');
+      final display = DateFormat('d MMM');
+      return (from: _fmtDate(custom.start), to: _fmtDate(custom.end),
+              label: '${display.format(custom.start)} – ${display.format(custom.end)}');
+  }
+}
+
 /// Expense Accounts Screen — manager float management.
 ///
 /// Shows only internal supplier accounts (manager floats). Provides:
@@ -300,6 +344,9 @@ class _AccountDetailState extends State<_AccountDetail> {
   List<LedgerEntry> _entries = [];
   bool _loadingLedger = true;
 
+  _LedgerPeriod _ledgerPeriod = _LedgerPeriod.allTime;
+  DateTimeRange? _customLedgerRange;
+
   @override
   void initState() {
     super.initState();
@@ -309,8 +356,9 @@ class _AccountDetailState extends State<_AccountDetail> {
   Future<void> _loadLedger() async {
     setState(() => _loadingLedger = true);
     try {
-      final list =
-          await ApiService.instance.getSupplierLedger(widget.account.id);
+      final pd = _ledgerPeriodDates(_ledgerPeriod, _customLedgerRange);
+      final list = await ApiService.instance
+          .getSupplierLedger(widget.account.id, from: pd.from, to: pd.to);
       if (!mounted) return;
       setState(() {
         _entries       = list;
@@ -349,8 +397,12 @@ class _AccountDetailState extends State<_AccountDetail> {
 
   Future<void> _sendStatement() async {
     try {
-      final result = await ApiService.instance
-          .getSupplierStatementWhatsApp(widget.account.id);
+      final pd = _ledgerPeriodDates(_ledgerPeriod, _customLedgerRange);
+      final result = await ApiService.instance.getSupplierStatementWhatsApp(
+        widget.account.id,
+        from: pd.from,
+        to:   pd.to,
+      );
       final url = result['whatsapp_url'] as String?;
       if (url != null) {
         final uri = Uri.parse(url);
@@ -600,6 +652,58 @@ class _AccountDetailState extends State<_AccountDetail> {
           ),
         ),
         const Divider(height: 1),
+
+        // ── Period filter & header ──────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _LedgerPeriodSelector(
+                selected: _ledgerPeriod,
+                onChanged: (p) async {
+                  if (p == _LedgerPeriod.custom) {
+                    final range = await showDateRangePicker(
+                      context: context,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime.now(),
+                      initialDateRange: _customLedgerRange,
+                    );
+                    if (range == null) return;
+                    setState(() {
+                      _ledgerPeriod = _LedgerPeriod.custom;
+                      _customLedgerRange = range;
+                    });
+                  } else {
+                    setState(() {
+                      _ledgerPeriod = p;
+                      _customLedgerRange = null;
+                    });
+                  }
+                  _loadLedger();
+                },
+                customRange: _customLedgerRange,
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  const Text('Transaction History',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  Text('${_entries.length} entries',
+                      style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.refresh_rounded),
+                    onPressed: _loadLedger,
+                    tooltip: 'Refresh',
+                    iconSize: 20,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
 
         // ── Ledger entries ──────────────────────────────────────
         _LedgerSection(entries: _entries, loading: _loadingLedger),
@@ -1113,6 +1217,51 @@ class _ExpenseDialogState extends State<_ExpenseDialog> {
               backgroundColor: const Color(0xFFF57C00)),
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Period chip selector
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _LedgerPeriodSelector extends StatelessWidget {
+  final _LedgerPeriod selected;
+  final void Function(_LedgerPeriod) onChanged;
+  final DateTimeRange? customRange;
+
+  const _LedgerPeriodSelector({
+    required this.selected,
+    required this.onChanged,
+    this.customRange,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: _LedgerPeriod.values.map((p) {
+          String label = p.label;
+          if (p == _LedgerPeriod.custom && customRange != null) {
+            final fmt = DateFormat('d MMM');
+            label = '${fmt.format(customRange!.start)} – ${fmt.format(customRange!.end)}';
+          }
+          return Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: ChoiceChip(
+              label: Text(label, style: const TextStyle(fontSize: 12)),
+              selected: selected == p,
+              onSelected: (_) => onChanged(p),
+              selectedColor: const Color(0xFF1565C0).withOpacity(0.15),
+              labelStyle: TextStyle(
+                color: selected == p ? const Color(0xFF1565C0) : Colors.grey.shade700,
+                fontWeight: selected == p ? FontWeight.w700 : FontWeight.normal,
+              ),
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 }

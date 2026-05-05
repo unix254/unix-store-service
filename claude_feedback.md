@@ -298,3 +298,477 @@ The instructions explicitly required "NOT saved to the database". The procuremen
 
 **Why `AnimatedOpacity` rather than removing from the list:**
 Keeping excluded items visible (but visually suppressed) lets the user see what they've postponed at a glance and restore with one tap. Removing from the list would require a separate "Show postponed" UI to recover them.
+
+---
+
+## Investigation: Variance Date Filters & Metabase Reporting Strategy
+
+**Date:** 2026-05-05  
+**Status:** Analysis only — no code changes made.
+
+---
+
+### Executive Summary
+
+The current system is in excellent shape for adding date filters to the Flutter app — the backend already has most of what is needed. The Metabase story is also straightforward because both legacy POS tables and store tables live in the same `unicentapos` database. The three main things that need attention before building are: (1) a small correctness bug in the variance query (`quantity` vs `issued_quantity`), (2) aligning the store service to the 7 AM business-day shift, and (3) deciding whether to add a `store_stock_ledger` table for full historical stock tracking (not strictly needed for the variance dashboard, but needed for opening/closing balance reports).
+
+---
+
+### 1. Is the Schema a Ledger or an Overwrite?
+
+**`store_requisitions` IS already an append-only event ledger for issues.**  
+Every stock movement (Sales, Staff Meal, Wastage) creates a new row with `requested_at` and `issued_at` timestamps. No row is edited in-place for issuance — a new row is always appended. This is the right architecture and means date-range variance is already possible without schema changes.
+
+**What IS overwritten:**  
+`store_inventory.quantity_in_stock` — decremented on every issue, incremented on every delivery. It is a live snapshot, not history. Metabase cannot ask "what was the stock level on 15 April?" — it only knows the current level.
+
+**The missing piece — stock receipts (deliveries) are not event-logged.**  
+When a delivery arrives via `PATCH /api/inventory/:id/adjust`, the code does `UPDATE store_inventory SET quantity_in_stock = quantity_in_stock + delta`. There is no corresponding row written to any historical table. The cost change is logged to `store_cost_history`, but the *quantity received* is not. This means:
+- Variance by date range: ✅ fully supported (uses `store_requisitions`)
+- Opening/closing stock per period: ❌ not possible today (no receipt event log)
+
+**Recommendation: Add `store_stock_ledger` — low urgency, high future value.**
+
+Proposed schema (to add in a future migration):
+```sql
+CREATE TABLE store_stock_ledger (
+  id                VARCHAR(36)   NOT NULL,
+  inventory_item_id VARCHAR(36)   NOT NULL,
+  movement_type     ENUM('RECEIPT','ISSUE','ADJUSTMENT','CYCLE_COUNT') NOT NULL,
+  quantity          DECIMAL(12,3) NOT NULL,  -- positive = in, negative = out
+  reference_id      VARCHAR(36)   NULL,      -- FK to store_requisitions.id or PO id
+  reference_type    VARCHAR(30)   NULL,      -- 'requisition', 'purchase_order', 'manual'
+  purpose           VARCHAR(50)   NULL,      -- 'Sales','Staff Meal','Wastage','Delivery'
+  actor_name        VARCHAR(100)  NULL,
+  notes             VARCHAR(500)  NULL,
+  transaction_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  INDEX idx_ledger_item_date (inventory_item_id, transaction_at),
+  INDEX idx_ledger_date      (transaction_at)
+);
+```
+Write to this on every stock change (issues, deliveries, adjustments, cycle count corrections). This becomes the single source of truth for "stock movement over any period" in Metabase. **Build this only after the date-filter variance is working — it is not a blocker for the immediate features.**
+
+---
+
+### 2. How the Current Variance Query Works
+
+The query at [`src/routes/pos.js:113`](src/routes/pos.js) has three layers:
+
+**Layer A — Yield Config backbone:**  
+`store_yield_config` joined to `store_inventory` → gives ingredient ↔ POS product mapping and `portions_per_unit` ratio.
+
+**Layer B — POS Sales subquery (legacy tables, read-only):**
+```sql
+SELECT tl.product, SUM(tl.units) AS total_sold
+FROM ticketlines tl
+JOIN tickets t  ON t.id = tl.ticket
+JOIN receipts r ON r.id = t.id
+WHERE DATE(r.datenew) = CURDATE()   -- ← "today" hardcoded
+  AND t.tickettype = 0
+GROUP BY tl.product
+```
+
+**Layer C — Actual issued subquery (store table):**
+```sql
+SELECT inventory_item_id,
+  SUM(CASE WHEN purpose = 'Sales'    THEN quantity ELSE 0 END)
+  - SUM(CASE WHEN purpose = 'Wastage' THEN quantity ELSE 0 END)
+    AS total_issued
+FROM store_requisitions
+WHERE status = 'Issued'
+  AND purpose IN ('Sales', 'Wastage')
+  AND DATE(issued_at) = CURDATE()   -- ← "today" hardcoded
+GROUP BY inventory_item_id
+```
+
+**Can this support date range filters? YES — trivially.**  
+The date filter is in exactly two places in the whole query. Replace `CURDATE()` comparisons with parameterized range bounds. The existing `/api/pos/sales/range?from&to` endpoint already demonstrates this pattern. A new `GET /api/pos/variance/range?from=YYYY-MM-DD&to=YYYY-MM-DD` endpoint can reuse 95% of the existing SQL.
+
+**Latent correctness bug — `quantity` vs `issued_quantity`:**  
+Layer C uses `quantity` (the originally-requested amount). But since Milestone 8, the storekeeper can issue a *different* quantity (`issued_quantity` column, added in migration 011). For any partial issuance, the variance will be wrong. The correct column is `COALESCE(issued_quantity, quantity)`. **Fix this before adding date filters so all historical data is accurate.**
+
+---
+
+### 3. Performance & the 60-Second Auto-Refresh
+
+**Why is the query heavy?**
+
+Three compounding reasons:
+
+1. **`DATE()` wrapping prevents index use.** `DATE(r.datenew) = CURDATE()` forces a full-table function evaluation on `receipts`. Same for `DATE(issued_at)`. Fix: use range comparisons `r.datenew >= CURDATE() AND r.datenew < CURDATE() + INTERVAL 1 DAY` — this lets MariaDB use an index on `datenew` if one exists.
+
+2. **The query joins 5+ tables across legacy and store schemas in a single round trip.** Each call scans `ticketlines → tickets → receipts` for the day's sales, plus `store_requisitions` for issuances, plus the yield config join. On a busy restaurant POS with months of data in `ticketlines`, this is non-trivial.
+
+3. **The 60-second timer fires regardless of whether anyone is watching the screen.** The timer starts in `initState()` and only cancels in `dispose()`. If a user leaves the BI Hub open while doing other work, it runs silently in the background forever.
+
+**Recommendation: Kill the auto-refresh for the Variance screen.**
+
+The variance dashboard is analytical, not operational. Unlike the Kitchen screen (which must show live pending requests), variance is a shift-management tool — it doesn't need sub-minute freshness. The manual Refresh button already exists. Steps:
+
+1. Remove `Timer.periodic(...)` from `VarianceScreen.initState()` — 5-minute change.
+2. Add a short server-side in-memory cache in `pos.js` for the `variance/today` endpoint (5-minute TTL). This means even if a user hammers the manual Refresh button, the DB is only hit once every 5 minutes.
+3. Confirm `receipts.datenew` has an index in the MariaDB schema. If not, add one (it's a read-only legacy table — adding an index is safe and not a violation of the read-only rule).
+
+---
+
+### 4. The 7 AM Business Day Shift
+
+**Current behavior:** Both the variance query and `/sales/today` use `DATE(r.datenew) = CURDATE()` — standard midnight-to-midnight. A kitchen issuance at 2 AM Wednesday counts as Wednesday's issues, but it was actually part of Tuesday's dinner service.
+
+**The existing Metabase dashboards already use a 7 AM shift**, so the store service needs to match for the data to be comparable.
+
+**The formula:**
+```
+business_day(timestamp) = DATE(timestamp - INTERVAL 7 HOUR)
+```
+
+Example: 2 AM Wednesday − 7 hours = Wednesday 7 PM Tuesday → DATE = Tuesday ✓
+
+**SQL implementation:**
+```sql
+-- "Today's business day" comparisons:
+-- Instead of: WHERE DATE(r.datenew) = CURDATE()
+WHERE DATE(r.datenew - INTERVAL 7 HOUR) = DATE(NOW() - INTERVAL 7 HOUR)
+
+-- Range for a specific business day X:
+WHERE r.datenew >= CONCAT(DATE(X), ' 07:00:00')
+  AND r.datenew < DATE_ADD(CONCAT(DATE(X), ' 07:00:00'), INTERVAL 1 DAY)
+```
+
+**Where to apply:**
+- `GET /api/pos/variance/today` — both the sales and issuances subqueries
+- The new `variance/range` endpoint — from/to params treated as business days, expanded to actual timestamps using the 7-hour offset
+- `/api/pos/sales/today` — for consistency
+
+**Implementation tip:** Add a `BUSINESS_DAY_SHIFT_HOURS` environment variable (default `7`) to make this configurable per client in the future.
+
+---
+
+### 5. Metabase Integration Strategy
+
+**The big advantage: everything is in one database.**  
+Metabase is on the same `unicenta-network` Docker network and connects directly to MariaDB `unicentapos` (confirmed in `docker-compose.yml:18-32`). Both `store_*` tables and legacy `ticketlines/receipts/products` are in the same schema. This means Metabase SQL questions can freely JOIN them — no HTTP calls, no API bridging, no cross-database complexity.
+
+**`JAVA_TIMEZONE=Africa/Nairobi` is already set on the Metabase container** — timezone-aware queries will work correctly.
+
+---
+
+#### Proposed Metabase Dashboard 1: "Daily Variance Report"
+
+This is the primary management dashboard — replaces the need to open the Flutter app for long-range analysis.
+
+Core query (uses Metabase `{{date_from}}` and `{{date_to}}` filter variables):
+```sql
+SELECT
+  i.name                                                           AS item,
+  i.unit_of_measure                                                AS uom,
+  i.cost_per_unit,
+  GROUP_CONCAT(p.name ORDER BY p.name SEPARATOR ' / ')            AS pos_products,
+  ROUND(SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit), 3)
+                                                                   AS expected_qty,
+  COALESCE(iss.total_issued, 0)                                   AS actual_issued,
+  ROUND(COALESCE(iss.total_issued, 0)
+    - SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit), 3)
+                                                                   AS variance_qty,
+  ROUND(
+    (COALESCE(iss.total_issued, 0)
+    - SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit))
+    * COALESCE(i.cost_per_unit, 0), 2
+  )                                                                AS variance_kes
+FROM store_yield_config yc
+JOIN store_inventory i ON i.id = yc.inventory_item_id
+LEFT JOIN products p ON p.id = yc.unicenta_product_id
+LEFT JOIN (
+  -- POS sales with 7 AM business-day shift
+  SELECT tl.product, SUM(tl.units) AS total_sold
+  FROM ticketlines tl
+  JOIN tickets t  ON t.id = tl.ticket
+  JOIN receipts r ON r.id = t.id
+  WHERE DATE(r.datenew - INTERVAL 7 HOUR)
+          BETWEEN {{date_from}} AND {{date_to}}
+    AND t.tickettype = 0
+  GROUP BY tl.product
+) sales ON sales.product = yc.unicenta_product_id
+LEFT JOIN (
+  -- Actual issued (Sales minus Wastage) with 7 AM shift
+  SELECT
+    inventory_item_id,
+    SUM(CASE WHEN purpose = 'Sales'
+             THEN COALESCE(issued_quantity, quantity) ELSE 0 END)
+    - SUM(CASE WHEN purpose = 'Wastage'
+               THEN COALESCE(issued_quantity, quantity) ELSE 0 END)
+      AS total_issued
+  FROM store_requisitions
+  WHERE status = 'Issued'
+    AND purpose IN ('Sales', 'Wastage')
+    AND inventory_item_id IS NOT NULL
+    AND DATE(issued_at - INTERVAL 7 HOUR)
+          BETWEEN {{date_from}} AND {{date_to}}
+  GROUP BY inventory_item_id
+) iss ON iss.inventory_item_id = yc.inventory_item_id
+GROUP BY i.id, i.name, i.unit_of_measure, i.cost_per_unit, iss.total_issued
+ORDER BY ABS(variance_kes) DESC NULLS LAST
+```
+
+The `{{date_from}}` and `{{date_to}}` become a date-range picker widget automatically in the Metabase dashboard UI.
+
+---
+
+#### Proposed Metabase Dashboard 2: "Weekly Variance Trend"
+
+Shows whether variance is improving or worsening week-over-week. Group by business week:
+```sql
+SELECT
+  YEARWEEK(DATE(r.datenew - INTERVAL 7 HOUR), 1) AS business_week,
+  MIN(DATE(r.datenew - INTERVAL 7 HOUR))         AS week_start,
+  i.name                                          AS item,
+  ROUND(SUM(tl.units) / yc.portions_per_unit, 3) AS expected_qty,
+  -- join to store_requisitions as in Dashboard 1...
+```
+
+This gives a time-series chart per ingredient — powerful for spotting seasonal patterns (e.g. chicken variance always spikes on weekends).
+
+---
+
+#### Proposed Metabase Dashboard 3: "Staff Meal & Wastage Cost"
+
+A separate view showing the KES cost of non-sales stock movements — segmented by purpose:
+```sql
+SELECT
+  DATE(issued_at - INTERVAL 7 HOUR)   AS business_date,
+  purpose,
+  i.name                               AS item,
+  SUM(COALESCE(issued_quantity, quantity)) AS qty_issued,
+  SUM(COALESCE(issued_quantity, quantity) * COALESCE(i.cost_per_unit, 0)) AS cost_kes
+FROM store_requisitions sr
+JOIN store_inventory i ON i.id = sr.inventory_item_id
+WHERE status = 'Issued'
+  AND purpose IN ('Staff Meal', 'Wastage', 'Other')
+  AND inventory_item_id IS NOT NULL
+  AND DATE(issued_at - INTERVAL 7 HOUR)
+        BETWEEN {{date_from}} AND {{date_to}}
+GROUP BY business_date, purpose, sr.inventory_item_id, i.name
+ORDER BY business_date DESC, cost_kes DESC
+```
+
+---
+
+### 6. Pitfalls for Metabase Queries
+
+**1. `issued_quantity` vs `quantity` — always use `COALESCE(issued_quantity, quantity)`.**  
+`issued_quantity` was added in migration 011. Older rows (before partial issuance was implemented) have `issued_quantity = NULL`. `COALESCE` handles both old and new rows correctly. Never use bare `quantity` in issued-stock aggregations.
+
+**2. `inventory_item_id = NULL` rows exist.**  
+Free-text "new item requests" have `inventory_item_id = NULL`. Always add `WHERE inventory_item_id IS NOT NULL` to any aggregation that joins `store_inventory`.
+
+**3. `purpose` has 4 values: Sales, Staff Meal, Wastage, Other.**  
+The variance engine only compares Sales vs POS. Staff Meal and Wastage are separate cost categories. Filter `purpose = 'Sales'` for variance; use `purpose IN ('Staff Meal','Wastage','Other')` for cost reporting.
+
+**4. `receipts.datenew` index.**  
+Over months of operation, `ticketlines` + `receipts` grows large. Confirm `receipts.datenew` has an index. Long-range Metabase queries (30+ days) will be slow without it. Check with: `SHOW INDEX FROM receipts`. Adding an index to a legacy table is safe — it does not violate the read-only rule (the rule only prohibits INSERT/UPDATE/DELETE on the data, not schema maintenance).
+
+**5. Timezone — verify MariaDB `time_zone`.**  
+`JAVA_TIMEZONE=Africa/Nairobi` is set on the Metabase container. But if MariaDB's `@@time_zone` is still `UTC` (the Docker default), then `NOW()` and `CURDATE()` return UTC time inside SQL queries. The 7 AM shift math (`- INTERVAL 7 HOUR`) partially compensates, but the boundaries can be off by 3 hours (EAT = UTC+3). Verify with `SELECT @@global.time_zone` and set it to `Africa/Nairobi` if needed.
+
+---
+
+### 7. Flutter App: Adding Date Filters to the Variance Screen
+
+#### Backend: New Range Endpoint
+Add `GET /api/pos/variance/range?from=YYYY-MM-DD&to=YYYY-MM-DD` to `pos.js`. Almost identical to the existing `variance/today` query — only the date filter changes. Keep `variance/today` as a convenience alias (internally call the range endpoint with today's business date, or keep the existing query untouched and have both).
+
+#### Flutter: UI Changes to `VarianceScreen`
+
+1. **Add `_selectedPeriod` state** — an enum: `today`, `yesterday`, `this_week`, `last_week`, `custom`.
+2. **Add a period selector in the header** — a `SegmentedButton` or `ChoiceChip` row. Options: `Today | Yesterday | This Week | Last Week | Custom`.
+3. **For `custom`, call `showDateRangePicker()`** — built into Flutter Material, gives a calendar UI.
+4. **Replace `getVarianceToday()` call** with `getVarianceRange(from, to)` calling the new endpoint.
+5. **Update the screen title** to show the selected period (e.g., "Usage Variance — This Week (29 Apr – 5 May)").
+6. **Remove the 60-second `Timer.periodic`** — keep only the manual Refresh button.
+
+**Business-day period calculations in Dart:**
+```dart
+// Helper: which business day does this DateTime fall on?
+DateTime businessDay(DateTime dt) {
+  final shifted = dt.subtract(const Duration(hours: 7));
+  return DateTime(shifted.year, shifted.month, shifted.day);
+}
+
+// "Today" as a business day
+final today = businessDay(DateTime.now());
+
+// "Yesterday"
+final yesterday = today.subtract(const Duration(days: 1));
+
+// "This week" — Monday to today
+final thisWeekStart = today.subtract(Duration(days: today.weekday - 1));
+final thisWeekEnd = today;
+
+// Format for API: YYYY-MM-DD
+String fmt(DateTime d) => '${d.year}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';
+```
+
+---
+
+### 8. Implementation Priority Order
+
+| Priority | Task | Effort | Impact |
+|---|---|---|---|
+| 1 | Fix `quantity` → `COALESCE(issued_quantity, quantity)` in variance query | 5 min | Correctness fix |
+| 2 | Add `GET /api/pos/variance/range?from&to` with 7 AM shift | 1–2 hrs | Core new feature |
+| 3 | Add date period selector to Flutter `VarianceScreen` | 2–3 hrs | User-requested |
+| 4 | Remove 60s auto-refresh from `VarianceScreen` | 5 min | Performance |
+| 5 | Verify `receipts.datenew` index exists; add if missing | 15 min | Performance |
+| 6 | Set up Metabase Dashboard 1 (Daily Variance) | 1–2 hrs | Reporting |
+| 7 | Set up Metabase Dashboard 2 (Weekly Trend) | 1 hr | Reporting |
+| 8 | Set up Metabase Dashboard 3 (Staff Meal & Wastage Cost) | 1 hr | Reporting |
+| 9 | Add 5-min server-side cache in `pos.js` for `variance/today` | 30 min | Performance |
+| 10 | Add `store_stock_ledger` table for full historical stock events | 2–3 hrs | Future (not blocker) |
+
+---
+
+## Milestone 20 — Date Filters, 7 AM Shift, Bug Fix & KPI Cards
+
+**Date:** 2026-05-05  
+**Status:** Complete
+
+### What was built
+
+#### Task 1 — Backend Bug Fix & 7 AM Business Day Shift (`src/routes/pos.js`)
+
+**Partial issuance bug fixed:** The issued subquery previously used bare `quantity`, which ignores cases where the storekeeper issued a different amount than requested (added in Milestone 8 via `issued_quantity` column). Changed to `COALESCE(issued_quantity, quantity)` in both Sales and Wastage CASE branches. This affects historical accuracy for all partial issuances.
+
+**7 AM shift applied:** Both the POS sales filter and the store requisitions filter now use the business-day shift formula:
+```sql
+DATE(r.datenew - INTERVAL 7 HOUR) = DATE(NOW() - INTERVAL 7 HOUR)
+DATE(issued_at - INTERVAL 7 HOUR) = DATE(NOW() - INTERVAL 7 HOUR)
+```
+A 2 AM issuance on Wednesday now correctly falls within Tuesday's business day, matching the existing Metabase dashboard convention.
+
+**Query refactored into a shared builder:** `_buildVarianceQuery(salesFilter, issuesFilter)` returns the full SQL with pluggable WHERE fragments. Both `variance/today` and `variance/range` call this function — DRY, no duplication.
+
+#### Task 2 — `GET /api/pos/variance/range?from=YYYY-MM-DD&to=YYYY-MM-DD`
+
+New endpoint added to `src/routes/pos.js`. Uses `BETWEEN ? AND ?` on the business-day-shifted dates. The `from` and `to` params are treated as business dates (7 AM shift applied inside the SQL). Four query params are passed to the prepared statement (two per subquery).
+
+#### Task 3 — `GET /api/pos/issues-cost/today`
+
+New endpoint added to `src/routes/pos.js`. Returns the total KES value of all items issued in the current 7 AM business day:
+```json
+{ "total_cost_kes": 4250.00, "total_issues": 12, "sales_count": 9, "staff_meal_count": 2, "wastage_count": 1 }
+```
+JOINs `store_requisitions` with `store_inventory` for `cost_per_unit`. Uses `COALESCE(issued_quantity, quantity)` for accuracy. Filters `inventory_item_id IS NOT NULL` to exclude free-text new-item requests.
+
+#### Task 4 — Variance Screen Refactor (`flutter_app/lib/screens/store/variance_screen.dart`)
+
+**Full rewrite** of the variance screen:
+
+- **Auto-refresh removed:** `Timer.periodic` (60s) and its `_autoRefresh` state variable are gone. Users use the manual Refresh button only.
+- **Period selector added:** A `ChoiceChip` row with 5 options — `Today | Yesterday | This Week | Last Week | Custom`. Custom opens Flutter's native `showDateRangePicker` calendar UI.
+- **Business-day helpers:** `_businessDay(DateTime)` subtracts 7 hours and takes the date — same shift logic as the backend. `_periodDates()` returns `(from, to, title)` for any period enum value.
+- **Dynamic title:** Header title updates to reflect the selected period (e.g. "Usage Variance — This Week", "Usage Variance — 29 Apr – 5 May").
+- **API change:** Calls `getVarianceRange(from, to)` instead of `getVarianceToday()`. The `getVarianceToday()` API method is kept for backward compatibility.
+- **Explainer banner updated** to mention the 7 AM business day.
+
+#### Task 5 — Inventory Capital KPI Card (`flutter_app/lib/screens/store/inventory_screen.dart`)
+
+- Added `_totalCapital` computed getter: `_items.fold(0.0, (sum, i) => sum + i.quantityInStock * (i.costPerUnit ?? 0.0))`.
+- Added `_CapitalKpiCard` widget class: teal gradient card showing the total KES value of all stock with item count. Rendered below the inventory header, above the search bar, once loading completes.
+- No additional API call needed — calculated from the already-fetched `_items` list.
+
+#### Task 6 — Issued Cost KPI Card (`flutter_app/lib/screens/store/requisition_approval.dart`)
+
+- Added `_issuedCostToday` and `_issuedCountToday` state fields.
+- `_loadRequisitions()` now uses `Future.wait([getRequisitions(), getIssuedCostToday()])` — both calls fire in parallel so there is no extra latency.
+- Added `_IssuedCostKpiCard` widget class: purple gradient card showing today's total issued cost (KES) and issue count. Sub-label reads "7 AM business day" so managers know the scope.
+- Rendered between the `_TopBar` and `_FilterTabs` in the build method.
+
+#### API service (`flutter_app/lib/services/api.dart`)
+
+Two new methods added:
+- `getVarianceRange(String from, String to)` → `GET /api/pos/variance/range?from=...&to=...`
+- `getIssuedCostToday()` → `GET /api/pos/issues-cost/today`
+
+### Architectural decisions
+
+**Why a shared SQL builder function (`_buildVarianceQuery`):** The variance SQL is ~50 lines with complex multi-level JOINs. Duplicating it for `today` vs `range` would create a maintenance trap where one gets bugfixes the other doesn't. The builder takes just the two filter fragments that differ between the two endpoints.
+
+**Why `variance/today` kept as a separate route:** Backward compatibility — the existing Flutter `getVarianceToday()` method still works; callers that haven't updated yet won't break. Internally, `variance/today` now uses the same shared builder with the 7 AM date filter.
+
+**Why calculate inventory capital on the frontend:** The `getInventory()` call already fetches all items with `quantity_in_stock` and `cost_per_unit`. A separate backend aggregation endpoint would be a redundant round trip. The Dart fold is O(n) and runs in microseconds.
+
+**Why `Future.wait` for requisitions + issued-cost:** The requisition approval screen already makes one heavy API call on every 30-second poll. Chaining `getIssuedCostToday()` sequentially would add ~50–200ms latency to every refresh. Parallel fetch keeps the UX snappy.
+
+**Why the KPI cards only render when `!_loading`:** Showing a zero-value KPI while data is still fetching would look incorrect. The card appears only once real data is available, avoiding a flash of `KES 0`.
+
+---
+
+### Summary of Key Architectural Findings
+
+| Question | Answer |
+|---|---|
+| Is `store_requisitions` an event ledger? | **Yes** — every issue is an append-only row with timestamps |
+| Is stock delivery logged historically? | **No** — only `quantity_in_stock` is updated (overwrite) |
+| Can date-range variance be done today? | **Yes** — the SQL only needs the `CURDATE()` replaced |
+| Is there a correctness bug in the current query? | **Yes** — `quantity` should be `COALESCE(issued_quantity, quantity)` |
+| Does the 7 AM shift apply to store tables? | **No yet** — needs to be added to match Metabase |
+| Can Metabase JOIN store and legacy tables? | **Yes** — same `unicentapos` DB, same MariaDB instance |
+| Is the 60s auto-refresh justified? | **No** — analytical dashboard, should be manual-only |
+
+---
+
+## Milestone 21 — Operational UI Polish & Filters
+
+**Date:** 2026-05-05  
+**Status:** Complete
+
+### Task 1 — Requisitions Auto-Refresh & Error Handling (`requisition_approval.dart`)
+
+- **Poll interval changed:** `Timer.periodic(Duration(seconds: 30), ...)` → `Timer.periodic(Duration(minutes: 30), ...)`. Countdown ticker reduced from per-second to per-minute.
+- **Three-method pattern** introduced to separate background vs user-initiated fetches:
+  - `_loadRequisitions()` — sets `_loading = true`, calls `_fetchAndApply()`, shows errors on failure (user-triggered path).
+  - `_backgroundPoll()` — calls `_fetchAndApply()` inside a bare `try { } catch (_) { }` that swallows all exceptions silently (timer-triggered path).
+  - `_fetchAndApply({bool background = false})` — shared data logic; calls `Future.wait([getRequisitions(), getIssuedCostToday()])` and applies state.
+- **Result:** Red `ClientException` error screens from brief network drops during background polling are permanently eliminated.
+
+### Task 2 — Supplier List Layout Fix (`supplier_ledger.dart`)
+
+- **Root cause:** The `ListTile.title` `Row` used `mainAxisSize: MainAxisSize.min` with a `Flexible` wrapping the name `Text`. On wide screens, when the "Internal" badge was present, the `Flexible` could collapse to zero width, causing the name text to render one character per line.
+- **Fix:** Changed to `Row()` (default `mainAxisSize: MainAxisSize.max`) + `Expanded` with `overflow: TextOverflow.ellipsis`. The name now takes all available space and gracefully truncates. The badge stays right-aligned within the row.
+
+### Task 3 — Supplier Ledger Date Filters
+
+#### Backend (`src/routes/suppliers.js`)
+
+- **`GET /:id/ledger`**: Now accepts optional `?from=YYYY-MM-DD&to=YYYY-MM-DD` query params. If provided, adds `AND l.transaction_date >= ?` / `AND l.transaction_date <= ?` clauses to the SQL.
+- **`GET /:id/statement`**: Accepts `?from=...&to=...` (custom range) OR `?days=N` (rolling window). When `from`/`to` are provided, `days` is computed from the difference for the summary section. Period label reflects the actual dates.
+- **`GET /:id/statement/whatsapp`**: Same logic as above — WhatsApp message header now reads "Statement for period: X – Y" when a date filter is active.
+
+#### API Service (`flutter_app/lib/services/api.dart`)
+
+- `getSupplierLedger(supplierId, {String? from, String? to})` — builds query string conditionally.
+- `getSupplierStatementWhatsApp(supplierId, {int days = 30, String? from, String? to})` — prefers `from`/`to` over `days` when both are provided.
+
+#### Flutter UI (`flutter_app/lib/screens/store/supplier_ledger.dart`)
+
+- **Enum + helpers** added at file scope: `_LedgerPeriod` (5 values: `thisMonth`, `lastMonth`, `last90`, `allTime`, `custom`), `_LedgerPeriodLabel` extension, `_fmtDate()`, `_ledgerPeriodDates()` — returns `({String? from, String? to, String label})`.
+- **State** in `_SupplierDetailState`: `_LedgerPeriod _ledgerPeriod = _LedgerPeriod.allTime` and `DateTimeRange? _customLedgerRange`.
+- **`_loadLedger()`**: Calls `_ledgerPeriodDates()` and passes `from`/`to` to `getSupplierLedger()`.
+- **`_sendMiniStatement()`**: Calls `_ledgerPeriodDates()` and passes `from`/`to` to `getSupplierStatementWhatsApp()` — WhatsApp statement now always reflects the active filter.
+- **`_LedgerPeriodSelector` widget**: Horizontally scrollable `ChoiceChip` row rendered above the "Transaction History" title. Custom period opens `showDateRangePicker`; the chip label updates to the selected date range (e.g. "1 Apr – 30 Apr"). Selecting any other period clears `_customLedgerRange` and reloads.
+
+### Task 4 — Variance Print Placeholder (`variance_screen.dart`)
+
+- Added a `picture_as_pdf_rounded` `IconButton` in the `_VarianceHeader` `Wrap`, to the left of the Refresh button.
+- Tapping it shows a styled `SnackBar` (teal background, floating, rounded, 3-second duration) with a PDF icon and the message "PDF Report generation coming soon."
+- `tooltip: 'Download PDF (coming soon)'` provides hover context on desktop.
+- No functional wiring — placeholder only. The button is always enabled so the message is always discoverable.
+
+### Architectural notes
+
+**Why allTime is the default for ledger period:** New users and initial reviews are most likely to want to see the full history. Defaulting to "This Month" would hide older debts. Users can narrow as needed.
+
+**Why the WhatsApp statement respects the active filter:** If a manager selects "Last Month" to review February's statement and then taps "Send Statement," they expect the message to reflect what's on screen — not 30 rolling days. Passing `from`/`to` makes the behavior predictable without any additional UX explanation.
+
+**Why the print button is always enabled (not `onPressed: null`):** A disabled button is invisible to new users. An always-enabled button with a "coming soon" snackbar teaches the user that the feature exists and is planned, which is better for adoption when the real PDF engine ships.

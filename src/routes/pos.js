@@ -100,67 +100,127 @@ router.get('/sales/range', async (req, res) => {
   }
 });
 
+// ── Shared variance SQL builder ────────────────────────────────────────────────
+// Generates the full variance query for a given date filter clause.
+// `salesFilter`  : WHERE fragment applied to the receipts/ticketlines subquery
+// `issuesFilter` : WHERE fragment applied to the store_requisitions subquery
+// Both fragments must not include a leading AND.
+function _buildVarianceQuery(salesFilter, issuesFilter) {
+  return `
+    SELECT
+      i.id                                AS inventory_item_id,
+      i.name                              AS inventory_item_name,
+      i.unit_of_measure,
+      GROUP_CONCAT(p.name ORDER BY p.name SEPARATOR ' / ')
+                                          AS pos_product_name,
+      ROUND(SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit), 3)
+                                          AS expected_consumption,
+      COALESCE(issued.total_issued, 0)    AS actual_issued,
+      ROUND(
+        COALESCE(issued.total_issued, 0)
+        - SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit),
+        3
+      )                                   AS variance_qty
+    FROM store_yield_config yc
+    JOIN store_inventory i  ON i.id  = yc.inventory_item_id
+    LEFT JOIN products p         ON p.id  = yc.unicenta_product_id
+    LEFT JOIN (
+      SELECT tl.product, SUM(tl.units) AS total_sold
+      FROM ticketlines tl
+      JOIN tickets t  ON t.id = tl.ticket
+      JOIN receipts r ON r.id = t.id
+      WHERE ${salesFilter}
+        AND t.tickettype = 0
+      GROUP BY tl.product
+    ) sales ON sales.product = yc.unicenta_product_id
+    LEFT JOIN (
+      -- COALESCE(issued_quantity, quantity): uses actual issued qty when storekeeper
+      -- adjusted the amount, falls back to requested qty for legacy rows (pre-M8).
+      SELECT
+        inventory_item_id,
+        SUM(CASE WHEN purpose = 'Sales'
+                 THEN COALESCE(issued_quantity, quantity) ELSE 0 END)
+        - SUM(CASE WHEN purpose = 'Wastage'
+                   THEN COALESCE(issued_quantity, quantity) ELSE 0 END)
+          AS total_issued
+      FROM store_requisitions
+      WHERE status = 'Issued'
+        AND purpose IN ('Sales', 'Wastage')
+        AND inventory_item_id IS NOT NULL
+        AND ${issuesFilter}
+      GROUP BY inventory_item_id
+    ) issued ON issued.inventory_item_id = yc.inventory_item_id
+    GROUP BY i.id, i.name, i.unit_of_measure, issued.total_issued
+    ORDER BY ABS(ROUND(
+      COALESCE(issued.total_issued, 0) - SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit),
+      3
+    )) DESC
+  `;
+}
+
 // GET /api/pos/variance/today
-// Core of the Usage Variance engine:
-// Compares what the store ISSUED (store_requisitions, purpose=Sales, today)
-// vs what the POS SOLD (ticketlines, today), using the yield config to convert.
-//
-// AGGREGATION FIX: Group by inventory item (i.id) to prevent double-counting
-// actual_issued when one ingredient maps to multiple POS products.
-// Expected consumption = SUM( total_units_sold / portions_per_unit ) across all mapped products.
-// Actual issued        = (Total Sales issues) - (Logged Wastage) for today — waste is excluded.
-// Variance             = actual_issued - expected_consumption  (positive = over-issued = potential loss)
+// Uses 7 AM–7 AM business day shift so late-night sales (e.g. 2 AM) are
+// counted against the previous day's shift rather than the calendar day.
 router.get('/variance/today', async (req, res) => {
+  try {
+    const sql = _buildVarianceQuery(
+      `DATE(r.datenew - INTERVAL 7 HOUR) = DATE(NOW() - INTERVAL 7 HOUR)`,
+      `DATE(issued_at - INTERVAL 7 HOUR) = DATE(NOW() - INTERVAL 7 HOUR)`
+    );
+    const rows = await query(sql);
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/pos/variance/range?from=YYYY-MM-DD&to=YYYY-MM-DD
+// Both `from` and `to` are treated as business days (7 AM shift applied).
+// E.g. from=2026-05-01&to=2026-05-05 covers 01-May 07:00 → 06-May 07:00.
+router.get('/variance/range', async (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) {
+    return res.status(400).json({ error: 'from and to query params required (YYYY-MM-DD)' });
+  }
+  try {
+    const sql = _buildVarianceQuery(
+      `DATE(r.datenew - INTERVAL 7 HOUR) BETWEEN ? AND ?`,
+      `DATE(issued_at - INTERVAL 7 HOUR) BETWEEN ? AND ?`
+    );
+    // Each subquery needs from + to params → 4 params total
+    const rows = await query(sql, [from, to, from, to]);
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/pos/issues-cost/today
+// Returns the total KES value of all items issued in the current 7 AM business day.
+// Used by the Requisitions screen KPI card so managers see live cash-out value.
+router.get('/issues-cost/today', async (req, res) => {
   try {
     const rows = await query(`
       SELECT
-        i.id                                AS inventory_item_id,
-        i.name                              AS inventory_item_name,
-        i.unit_of_measure,
-        -- Concatenate all mapped POS product names for display
-        GROUP_CONCAT(p.name ORDER BY p.name SEPARATOR ' / ')
-                                            AS pos_product_name,
-        -- Sum expected consumption across all POS product mappings
-        ROUND(SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit), 3)
-                                            AS expected_consumption,
-        COALESCE(issued.total_issued, 0)    AS actual_issued,
-        ROUND(
-          COALESCE(issued.total_issued, 0)
-          - SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit),
-          3
-        )                                   AS variance_qty
-      FROM store_yield_config yc
-      JOIN store_inventory i  ON i.id  = yc.inventory_item_id
-      LEFT JOIN products p         ON p.id  = yc.unicenta_product_id
-      LEFT JOIN (
-        -- Today's POS sales per product
-        SELECT tl.product, SUM(tl.units) AS total_sold
-        FROM ticketlines tl
-        JOIN tickets t  ON t.id = tl.ticket
-        JOIN receipts r ON r.id = t.id
-        WHERE DATE(r.datenew) = CURDATE()
-          AND t.tickettype = 0
-        GROUP BY tl.product
-      ) sales ON sales.product = yc.unicenta_product_id
-      LEFT JOIN (
-        -- Actual issued = Sales issues MINUS kitchen-logged wastage for today.
-        -- Waste is excluded so dropped items don't inflate the kitchen's variance.
-        SELECT
-          inventory_item_id,
-          SUM(CASE WHEN purpose = 'Sales'    THEN quantity ELSE 0 END)
-          - SUM(CASE WHEN purpose = 'Wastage' THEN quantity ELSE 0 END)
-            AS total_issued
-        FROM store_requisitions
-        WHERE status = 'Issued'
-          AND purpose IN ('Sales', 'Wastage')
-          AND DATE(issued_at) = CURDATE()
-        GROUP BY inventory_item_id
-      ) issued ON issued.inventory_item_id = yc.inventory_item_id
-      -- GROUP BY inventory item to collapse multiple POS-product mappings
-      GROUP BY i.id, i.name, i.unit_of_measure, issued.total_issued
-      ORDER BY ABS(ROUND(COALESCE(issued.total_issued, 0) - SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit), 3)) DESC
+        ROUND(SUM(
+          COALESCE(r.issued_quantity, r.quantity) * COALESCE(i.cost_per_unit, 0)
+        ), 2)                                                     AS total_cost_kes,
+        COUNT(*)                                                  AS total_issues,
+        SUM(CASE WHEN r.purpose = 'Sales'
+                 THEN 1 ELSE 0 END)                              AS sales_count,
+        SUM(CASE WHEN r.purpose = 'Staff Meal'
+                 THEN 1 ELSE 0 END)                              AS staff_meal_count,
+        SUM(CASE WHEN r.purpose = 'Wastage'
+                 THEN 1 ELSE 0 END)                              AS wastage_count
+      FROM store_requisitions r
+      JOIN store_inventory i ON i.id = r.inventory_item_id
+      WHERE r.status = 'Issued'
+        AND r.inventory_item_id IS NOT NULL
+        AND DATE(r.issued_at - INTERVAL 7 HOUR) = DATE(NOW() - INTERVAL 7 HOUR)
     `);
-    res.json(rows);
+    res.json(rows[0] ?? { total_cost_kes: 0, total_issues: 0 });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });

@@ -10,6 +10,65 @@ import '../../services/api.dart';
 final _kes = NumberFormat.currency(locale: 'en_KE', symbol: 'KES ', decimalDigits: 2);
 final _dateFmt = DateFormat('dd MMM yyyy');
 
+// ── Ledger period filter ───────────────────────────────────────────────────────
+
+enum _LedgerPeriod { thisMonth, lastMonth, last90, allTime, custom }
+
+extension _LedgerPeriodLabel on _LedgerPeriod {
+  String get label {
+    switch (this) {
+      case _LedgerPeriod.thisMonth:  return 'This Month';
+      case _LedgerPeriod.lastMonth:  return 'Last Month';
+      case _LedgerPeriod.last90:     return 'Last 90 Days';
+      case _LedgerPeriod.allTime:    return 'All Time';
+      case _LedgerPeriod.custom:     return 'Custom';
+    }
+  }
+}
+
+String _fmtDate(DateTime d) =>
+    '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+// Returns (from, to) strings for the given period, or (null, null) for all time.
+({String? from, String? to, String label}) _ledgerPeriodDates(
+    _LedgerPeriod period, DateTimeRange? custom) {
+  final now = DateTime.now();
+  switch (period) {
+    case _LedgerPeriod.thisMonth:
+      return (
+        from:  _fmtDate(DateTime(now.year, now.month, 1)),
+        to:    _fmtDate(now),
+        label: DateFormat('MMM yyyy').format(now),
+      );
+    case _LedgerPeriod.lastMonth:
+      final first = DateTime(now.year, now.month - 1, 1);
+      final last  = DateTime(now.year, now.month, 0);
+      return (
+        from:  _fmtDate(first),
+        to:    _fmtDate(last),
+        label: DateFormat('MMM yyyy').format(first),
+      );
+    case _LedgerPeriod.last90:
+      return (
+        from:  _fmtDate(now.subtract(const Duration(days: 89))),
+        to:    _fmtDate(now),
+        label: 'Last 90 Days',
+      );
+    case _LedgerPeriod.allTime:
+      return (from: null, to: null, label: 'All Time');
+    case _LedgerPeriod.custom:
+      if (custom == null) {
+        return (from: null, to: null, label: 'Custom');
+      }
+      final display = DateFormat('d MMM');
+      return (
+        from:  _fmtDate(custom.start),
+        to:    _fmtDate(custom.end),
+        label: '${display.format(custom.start)} – ${display.format(custom.end)}',
+      );
+  }
+}
+
 class SupplierLedgerScreen extends StatefulWidget {
   final Staff staff;
   const SupplierLedgerScreen({super.key, required this.staff});
@@ -255,52 +314,88 @@ class _SupplierListState extends State<_SupplierList> {
                           itemBuilder: (_, i) {
                             final s = filtered[i];
                             final isSelected = widget.selected?.id == s.id;
-                            return ListTile(
-                              selected: isSelected,
-                              tileColor: s.isInternal
-                                  ? const Color(0xFFFFF8E1)
-                                  : null,
-                              selectedTileColor:
-                                  AppTheme.primary.withOpacity(0.08),
+                            return InkWell(
                               onTap: () => widget.onSelect(s),
-                              leading: CircleAvatar(
-                                backgroundColor: isSelected
-                                    ? AppTheme.primary
-                                    : AppTheme.scaffold,
-                                child: Text(
-                                  s.name.substring(0, 1).toUpperCase(),
-                                  style: TextStyle(
-                                    color: isSelected
-                                        ? Colors.white
-                                        : AppTheme.primary,
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                              child: Container(
+                                color: isSelected
+                                    ? AppTheme.primary.withOpacity(0.08)
+                                    : s.isInternal
+                                        ? const Color(0xFFFFF8E1)
+                                        : null,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 10),
+                                child: Row(
+                                  children: [
+                                    CircleAvatar(
+                                      backgroundColor: isSelected
+                                          ? AppTheme.primary
+                                          : AppTheme.scaffold,
+                                      child: Text(
+                                        s.name.substring(0, 1).toUpperCase(),
+                                        style: TextStyle(
+                                          color: isSelected
+                                              ? Colors.white
+                                              : AppTheme.primary,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                  s.name,
+                                                  style: const TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      fontSize: 14),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              if (s.isInternal) ...[
+                                                const SizedBox(width: 6),
+                                                Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                          horizontal: 6,
+                                                          vertical: 2),
+                                                  decoration: BoxDecoration(
+                                                    color:
+                                                        const Color(0xFFFF8F00),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            4),
+                                                  ),
+                                                  child: const Text('Internal',
+                                                      style: TextStyle(
+                                                          color: Colors.white,
+                                                          fontSize: 10,
+                                                          fontWeight:
+                                                              FontWeight.w700)),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                          Text(s.location ?? 'No location',
+                                              style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.grey.shade600)),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    _BalanceChip(amount: s.balanceDue),
+                                  ],
                                 ),
                               ),
-                              title: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Flexible(child: Text(s.name,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 14))),
-                                  if (s.isInternal) ...[
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFFF8F00),
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: const Text('Internal',
-                                          style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700)),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                              subtitle: Text(s.location ?? 'No location',
-                                  style: const TextStyle(fontSize: 12)),
-                              trailing: _BalanceChip(amount: s.balanceDue),
                             );
                           },
                         ),
@@ -339,6 +434,9 @@ class _SupplierDetailState extends State<_SupplierDetail> {
   List<LedgerEntry> _entries = [];
   bool _loadingLedger = true;
 
+  _LedgerPeriod _ledgerPeriod = _LedgerPeriod.allTime;
+  DateTimeRange? _customLedgerRange;
+
   @override
   void initState() {
     super.initState();
@@ -348,8 +446,9 @@ class _SupplierDetailState extends State<_SupplierDetail> {
   Future<void> _loadLedger() async {
     setState(() => _loadingLedger = true);
     try {
-      final list =
-          await ApiService.instance.getSupplierLedger(widget.supplier.id);
+      final pd = _ledgerPeriodDates(_ledgerPeriod, _customLedgerRange);
+      final list = await ApiService.instance
+          .getSupplierLedger(widget.supplier.id, from: pd.from, to: pd.to);
       setState(() {
         _entries = list;
         _loadingLedger = false;
@@ -381,8 +480,12 @@ class _SupplierDetailState extends State<_SupplierDetail> {
 
   Future<void> _sendMiniStatement() async {
     try {
-      final result = await ApiService.instance
-          .getSupplierStatementWhatsApp(widget.supplier.id);
+      final pd = _ledgerPeriodDates(_ledgerPeriod, _customLedgerRange);
+      final result = await ApiService.instance.getSupplierStatementWhatsApp(
+        widget.supplier.id,
+        from: pd.from,
+        to:   pd.to,
+      );
       final url = result['whatsapp_url'] as String?;
       if (url != null) {
         final uri = Uri.parse(url);
@@ -547,22 +650,54 @@ class _SupplierDetailState extends State<_SupplierDetail> {
         ),
         const Divider(height: 1),
 
-        // ── Transaction List ──────────────────────────────────
+        // ── Period filter & Transaction List header ───────────
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-          child: Row(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Transaction History',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-              const Spacer(),
-              Text('${_entries.length} entries',
-                  style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: const Icon(Icons.refresh_rounded),
-                onPressed: _loadLedger,
-                tooltip: 'Refresh',
-                iconSize: 20,
+              // Period chips
+              _LedgerPeriodSelector(
+                selected: _ledgerPeriod,
+                onChanged: (p) async {
+                  if (p == _LedgerPeriod.custom) {
+                    final range = await showDateRangePicker(
+                      context: context,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime.now(),
+                      initialDateRange: _customLedgerRange,
+                    );
+                    if (range == null) return;
+                    setState(() {
+                      _ledgerPeriod = _LedgerPeriod.custom;
+                      _customLedgerRange = range;
+                    });
+                  } else {
+                    setState(() {
+                      _ledgerPeriod = p;
+                      _customLedgerRange = null;
+                    });
+                  }
+                  _loadLedger();
+                },
+                customRange: _customLedgerRange,
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  const Text('Transaction History',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  Text('${_entries.length} entries',
+                      style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.refresh_rounded),
+                    onPressed: _loadLedger,
+                    tooltip: 'Refresh',
+                    iconSize: 20,
+                  ),
+                ],
               ),
             ],
           ),
@@ -1364,6 +1499,47 @@ class _OrderDialogState extends State<_OrderDialog> {
 // ─────────────────────────────────────────────────────────────────────────────
 // SMALL WIDGETS
 // ─────────────────────────────────────────────────────────────────────────────
+
+class _LedgerPeriodSelector extends StatelessWidget {
+  final _LedgerPeriod selected;
+  final void Function(_LedgerPeriod) onChanged;
+  final DateTimeRange? customRange;
+
+  const _LedgerPeriodSelector({
+    required this.selected,
+    required this.onChanged,
+    this.customRange,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: _LedgerPeriod.values.map((p) {
+          String label = p.label;
+          if (p == _LedgerPeriod.custom && customRange != null) {
+            final fmt = DateFormat('d MMM');
+            label = '${fmt.format(customRange!.start)} – ${fmt.format(customRange!.end)}';
+          }
+          return Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: ChoiceChip(
+              label: Text(label, style: const TextStyle(fontSize: 12)),
+              selected: selected == p,
+              onSelected: (_) => onChanged(p),
+              selectedColor: AppTheme.primary.withOpacity(0.15),
+              labelStyle: TextStyle(
+                color: selected == p ? AppTheme.primary : Colors.grey.shade700,
+                fontWeight: selected == p ? FontWeight.w700 : FontWeight.normal,
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
 
 class _BalanceChip extends StatelessWidget {
   final double amount;
