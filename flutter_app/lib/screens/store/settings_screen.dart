@@ -3,6 +3,7 @@ import '../../config/theme.dart';
 import '../../models/staff.dart';
 import '../../services/api.dart';
 import 'staff_management_screen.dart';
+import 'stations_screen.dart';
 
 /// Settings screen — Staff Management only.
 /// Business Details have been moved to the Super Admin Dashboard.
@@ -28,6 +29,12 @@ class _SettingsScreenState extends State<SettingsScreen>
           label: 'Staff Management',
           icon: Icons.badge_rounded,
           body: const StaffManagementScreen(),
+        ),
+      if (widget.staff.canManageStaff || widget.staff.canApproveRequisitions)
+        (
+          label: 'Kitchen Stations',
+          icon: Icons.kitchen_rounded,
+          body: const StationsScreen(),
         ),
     ];
     _tabCtrl = TabController(length: _tabs.length, vsync: this);
