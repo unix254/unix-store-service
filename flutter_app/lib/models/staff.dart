@@ -63,4 +63,9 @@ class Staff {
   /// Gates the entire BI Hub (Variance, Yield Config, Price Impact Advisory).
   /// Consolidates canViewVariance + canManageYieldConfig into a single flag.
   bool get canAccessBI => hasCapability('can_access_bi') || isManager || isOwner;
+
+  // ── v1.2.0: Kitchen station counts ───────────────────────────
+  /// Allows kitchen staff to submit closing/opening counts.
+  /// Managers and owners always have access.
+  bool get canDoStockCount => hasCapability('can_do_stock_count') || isManager || isOwner;
 }

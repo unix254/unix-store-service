@@ -752,6 +752,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   String _uom = 'kg';
   String? _supplierId;
   String? _defaultPurchaserId;
+  String? _riskTier;
   bool _saving = false;
 
   @override
@@ -772,6 +773,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     _uom                 = s?.unitOfMeasure ?? 'kg';
     _supplierId          = s?.supplierId;
     _defaultPurchaserId  = s?.defaultPurchaserId;
+    _riskTier            = s?.riskTier;
   }
 
   @override
@@ -797,6 +799,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       'supplier_id':           _supplierId,
       'default_purchaser_id':  _defaultPurchaserId,
       'notes':                 _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+      'risk_tier':             _riskTier,
     };
 
     try {
@@ -944,6 +947,35 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                             value: s.id, child: Text(s.name))),
                   ],
                   onChanged: (v) => setState(() => _defaultPurchaserId = v),
+                ),
+                const SizedBox(height: 12),
+                // Risk Tier (for kitchen count blind-recount logic)
+                DropdownButtonFormField<String?>(
+                  value: _riskTier,
+                  decoration: const InputDecoration(
+                    labelText: 'Risk Tier (Stock Count)',
+                    hintText: 'Auto (by cost)',
+                    prefixIcon: Icon(Icons.shield_outlined),
+                  ),
+                  items: const [
+                    DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('Auto (≥300 High, 50–300 Standard, <50 Low)'),
+                    ),
+                    DropdownMenuItem<String?>(
+                      value: 'High',
+                      child: Text('High – blind recount always required'),
+                    ),
+                    DropdownMenuItem<String?>(
+                      value: 'Standard',
+                      child: Text('Standard – blind recount required'),
+                    ),
+                    DropdownMenuItem<String?>(
+                      value: 'Low',
+                      child: Text('Low – one-tap confirm allowed'),
+                    ),
+                  ],
+                  onChanged: (v) => setState(() => _riskTier = v),
                 ),
                 const SizedBox(height: 12),
                 // Notes

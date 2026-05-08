@@ -603,4 +603,108 @@ class ApiService {
   Future<void> updateSettings(Map<String, String> updates) async {
     await _patch('/api/settings', updates);
   }
+
+  // ── Variance (v1.2 — dual-mode) ─────────────────────────────
+  // Returns { mode: 'estimate'|'verified', from, to, station_id, rows: [...] }
+  Future<Map<String, dynamic>> getVarianceRangeV2(
+      String from, String to, {String? stationId}) async {
+    String path = '/api/pos/variance/range?from=$from&to=$to';
+    if (stationId != null) path += '&station_id=$stationId';
+    final data = await _get(path);
+    return data as Map<String, dynamic>;
+  }
+
+  // ── Stations ────────────────────────────────────────────────
+
+  Future<List<Map<String, dynamic>>> getStations() async {
+    final data = await _get('/api/stations');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<String> createStation(String name, {String? description}) async {
+    final data = await _post('/api/stations', {
+      'name': name,
+      if (description != null && description.isNotEmpty) 'description': description,
+    });
+    return data['id'] as String;
+  }
+
+  Future<void> updateStation(String id, String name, {String? description}) async {
+    await _put('/api/stations/$id', {
+      'name': name,
+      if (description != null && description.isNotEmpty) 'description': description,
+    });
+  }
+
+  Future<void> toggleStation(String id) async {
+    await _patch('/api/stations/$id/toggle', {});
+  }
+
+  Future<void> deleteStation(String id) async {
+    await _delete('/api/stations/$id');
+  }
+
+  // ── Kitchen Counts ──────────────────────────────────────────
+
+  Future<List<Map<String, dynamic>>> getStationsSummary() async {
+    final data = await _get('/api/kitchen-counts/stations-summary');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> getActiveCountList(String stationId) async {
+    final data = await _get('/api/kitchen-counts/active-list/$stationId');
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getOpeningData(String stationId) async {
+    final data = await _get('/api/kitchen-counts/opening-data/$stationId');
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> submitClosingCount({
+    required String stationId,
+    required String countedBy,
+    required List<Map<String, dynamic>> items,
+  }) async {
+    final data = await _post('/api/kitchen-counts/closing', {
+      'station_id':  stationId,
+      'counted_by':  countedBy,
+      'items':       items,
+    });
+    return data as Map<String, dynamic>;
+  }
+
+  Future<void> submitOpeningCount({
+    required String stationId,
+    required String countedBy,
+    required List<Map<String, dynamic>> items,
+  }) async {
+    await _post('/api/kitchen-counts/opening', {
+      'station_id':  stationId,
+      'counted_by':  countedBy,
+      'items':       items,
+    });
+  }
+
+  Future<void> confirmSnapshot(String snapshotId, String confirmedBy,
+      {List<Map<String, dynamic>>? overrides}) async {
+    await _patch('/api/kitchen-counts/$snapshotId/confirm', {
+      'confirmed_by': confirmedBy,
+      if (overrides != null && overrides.isNotEmpty) 'overrides': overrides,
+    });
+  }
+
+  Future<Map<String, dynamic>> getKitchenLedger(
+      String date, {String? stationId}) async {
+    String path = '/api/kitchen-counts/ledger?date=$date';
+    if (stationId != null) path += '&station_id=$stationId';
+    final data = await _get(path);
+    return data as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> getStationSnapshots(
+      String stationId, {int days = 7}) async {
+    final data = await _get('/api/kitchen-counts/snapshots/$stationId?days=$days');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
 }

@@ -12,6 +12,8 @@ class InventoryItem {
   final String? defaultPurchaserName;
   final String? notes;
   final bool needsReorder;
+  /// 'High' | 'Standard' | 'Low' | null (null = auto-classify by cost)
+  final String? riskTier;
 
   const InventoryItem({
     required this.id,
@@ -27,6 +29,7 @@ class InventoryItem {
     this.defaultPurchaserName,
     this.notes,
     this.needsReorder = false,
+    this.riskTier,
   });
 
   factory InventoryItem.fromJson(Map<String, dynamic> j) => InventoryItem(
@@ -43,6 +46,7 @@ class InventoryItem {
         defaultPurchaserName: j['default_purchaser_name'] as String?,
         notes:                j['notes'] as String?,
         needsReorder:         (j['needs_reorder'] as num?)?.toInt() == 1,
+        riskTier:             j['risk_tier'] as String?,
       );
 
   /// Display label: "42.0 kg"

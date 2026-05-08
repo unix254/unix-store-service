@@ -12,6 +12,7 @@ import 'purchase_orders_screen.dart';
 import 'procurement_screen.dart';
 import 'settings_screen.dart';
 import 'expense_accounts_screen.dart';
+import 'kitchen_ledger_screen.dart';
 
 enum _NavItem {
   suppliers,
@@ -22,6 +23,7 @@ enum _NavItem {
   purchaseOrders,
   procurement,
   expenseAccounts,
+  kitchenLedger,
   settings,
 }
 
@@ -93,6 +95,8 @@ class _StoreShellState extends State<StoreShell> {
       // Phase 10: Expense Accounts — manager float / Cash-In workflows
       if (s.canManageExpenseAccounts)
         (icon: Icons.account_balance_wallet_rounded, label: 'Expense Accounts', item: _NavItem.expenseAccounts),
+      if (s.canAccessBI || s.canApproveRequisitions)
+        (icon: Icons.receipt_long_rounded, label: 'Kitchen Ledger', item: _NavItem.kitchenLedger),
       if (s.canManageStaff)
         (icon: Icons.settings_rounded,         label: 'Settings',          item: _NavItem.settings),
     ];
@@ -116,6 +120,8 @@ class _StoreShellState extends State<StoreShell> {
         return PayRunsScreen(staff: widget.staff);
       case _NavItem.expenseAccounts:
         return ExpenseAccountsScreen(staff: widget.staff);
+      case _NavItem.kitchenLedger:
+        return KitchenLedgerScreen(staff: widget.staff);
       case _NavItem.settings:
         return SettingsScreen(staff: widget.staff);
     }
@@ -232,7 +238,7 @@ class _Sidebar extends StatelessWidget {
               margin: const EdgeInsets.fromLTRB(12, 0, 12, 20),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.07),
+                color: Colors.white.withValues(alpha: 0.07),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Row(
@@ -325,7 +331,7 @@ class _NavTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
         color:
-            selected ? AppTheme.pinTeal.withOpacity(0.15) : Colors.transparent,
+            selected ? AppTheme.pinTeal.withValues(alpha: 0.15) : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
       ),
       child: ListTile(

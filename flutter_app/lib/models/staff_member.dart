@@ -68,6 +68,8 @@ const kAllCapabilities = <(String, String)>[
   ('can_manage_expense_accounts', 'Manage Expense Accounts'),
   // Milestone 16: BI Hub access (consolidates can_view_variance + can_manage_yield_config)
   ('can_access_bi',               'Access Business Intelligence Hub'),
+  // v1.2.0: Kitchen station counts
+  ('can_do_stock_count',          'Submit Kitchen Stock Counts'),
 ];
 
 /// Default capabilities seeded per role when a new staff member is created.

@@ -330,7 +330,8 @@ router.get('/:id', async (req, res) => {
 // POST /api/inventory  – add a new store item
 router.post('/', async (req, res) => {
   const { name, category, unit_of_measure, quantity_in_stock, reorder_level,
-          cost_per_unit, supplier_id, notes, lead_time_days, default_purchaser_id } = req.body;
+          cost_per_unit, supplier_id, notes, lead_time_days, default_purchaser_id,
+          risk_tier } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (!unit_of_measure) return res.status(400).json({ error: 'unit_of_measure is required' });
   const id = uuidv4();
@@ -338,11 +339,12 @@ router.post('/', async (req, res) => {
     await query(
       `INSERT INTO store_inventory
          (id, name, category, unit_of_measure, quantity_in_stock, reorder_level,
-          cost_per_unit, supplier_id, notes, lead_time_days, default_purchaser_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          cost_per_unit, supplier_id, notes, lead_time_days, default_purchaser_id, risk_tier)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, name, category || null, unit_of_measure, quantity_in_stock || 0,
        reorder_level || null, cost_per_unit || null, supplier_id || null,
-       notes || null, lead_time_days || null, default_purchaser_id || null]
+       notes || null, lead_time_days || null, default_purchaser_id || null,
+       risk_tier || null]
     );
     res.status(201).json({ id });
   } catch (err) {
@@ -353,17 +355,23 @@ router.post('/', async (req, res) => {
 // PUT /api/inventory/:id  – full update
 router.put('/:id', async (req, res) => {
   const { name, category, unit_of_measure, quantity_in_stock, reorder_level,
-          cost_per_unit, supplier_id, notes, lead_time_days, default_purchaser_id } = req.body;
+          cost_per_unit, supplier_id, notes, lead_time_days, default_purchaser_id,
+          risk_tier } = req.body;
+  const validRiskTiers = ['High', 'Standard', 'Low', null, undefined];
+  if (risk_tier !== undefined && !validRiskTiers.includes(risk_tier)) {
+    return res.status(400).json({ error: 'risk_tier must be High, Standard, Low, or null' });
+  }
   try {
     await query(
       `UPDATE store_inventory
        SET name=?, category=?, unit_of_measure=?, quantity_in_stock=?,
            reorder_level=?, cost_per_unit=?, supplier_id=?, notes=?,
-           lead_time_days=?, default_purchaser_id=?
+           lead_time_days=?, default_purchaser_id=?, risk_tier=?
        WHERE id=?`,
       [name, category || null, unit_of_measure, quantity_in_stock,
        reorder_level || null, cost_per_unit || null, supplier_id || null,
        notes || null, lead_time_days || null, default_purchaser_id || null,
+       risk_tier || null,
        req.params.id]
     );
     res.json({ ok: true });
@@ -493,8 +501,11 @@ router.patch('/:id/adjust', async (req, res) => {
   }
 });
 
-// POST /api/inventory/waste  – log kitchen spoilage / wastage directly
+// POST /api/inventory/waste  – log kitchen-side spoilage / wastage
 // Creates an immediately-Issued requisition with purpose='Wastage'. No approval required.
+// v1.2 change: does NOT deduct from store_inventory. Store stock was already reduced
+// when the item was transferred to the kitchen via a Sales requisition. Waste is a
+// kitchen-bin event only — it reduces the station's virtual balance, not the store ledger.
 // body: { inventory_item_id, quantity, notes, logged_by, requester_location? }
 router.post('/waste', async (req, res) => {
   const { inventory_item_id, quantity, notes, logged_by, requester_location } = req.body;
@@ -505,19 +516,16 @@ router.post('/waste', async (req, res) => {
     return res.status(400).json({ error: 'quantity must be positive' });
   }
   try {
-    // Fetch item for UOM
     const items = await query(
-      'SELECT id, name, unit_of_measure, quantity_in_stock FROM store_inventory WHERE id = ?',
+      'SELECT id, name, unit_of_measure FROM store_inventory WHERE id = ?',
       [inventory_item_id]
     );
     if (!items.length) return res.status(404).json({ error: 'Inventory item not found' });
     const item = items[0];
 
     const id = uuidv4();
-    const now = new Date();
-    const isoNow = now.toISOString().slice(0, 19).replace('T', ' ');
+    const isoNow = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
-    // Insert as an Issued requisition with purpose=Wastage
     await query(
       `INSERT INTO store_requisitions
          (id, inventory_item_id, quantity, unit_of_measure, requested_by, purpose, status,
@@ -527,11 +535,10 @@ router.post('/waste', async (req, res) => {
        logged_by, notes || null, requester_location || null, isoNow, logged_by]
     );
 
-    // Deduct stock immediately
-    await query(
-      'UPDATE store_inventory SET quantity_in_stock = quantity_in_stock - ? WHERE id = ?',
-      [quantity, inventory_item_id]
-    );
+    // No store_inventory deduction: stock left the store when it was issued to
+    // the kitchen. Waste is tracked in the kitchen bin via requisition records,
+    // and reflected in the true variance formula: true_consumption = opening +
+    // transfers − waste − closing.
 
     res.status(201).json({ id, item_name: item.name });
   } catch (err) {

@@ -16,6 +16,8 @@ const settingsRouter        = require('./routes/settings');
 const procurementRouter     = require('./routes/procurement');
 const featureFlagsRouter    = require('./routes/feature_flags');
 const adminRouter           = require('./routes/admin');
+const stationsRouter        = require('./routes/stations');
+const kitchenCountsRouter   = require('./routes/kitchen_counts');
 
 const app = express();
 
@@ -35,6 +37,8 @@ app.use('/api/settings',         settingsRouter);
 app.use('/api/procurement',      procurementRouter);
 app.use('/api/feature-flags',    featureFlagsRouter);
 app.use('/api/admin',            adminRouter);
+app.use('/api/stations',         stationsRouter);
+app.use('/api/kitchen-counts',   kitchenCountsRouter);
 
 // Health check
 app.get('/health', (req, res) => {
