@@ -122,16 +122,15 @@ router.get('/active-list/:stationId', async (req, res) => {
         WHERE ski.snapshot_id = ? AND ski.counted_quantity > 0
         UNION
         ` : ''}
-        -- Part B: any Sales requisition issued to kitchen-role staff in last 7 days.
-        -- We intentionally do NOT filter by station name here — the station name in
-        -- store_stations is independent of yunix_staff.location_name used on requisitions.
-        -- The station is the count bucket, not a location filter.
+        -- Part B: Sales requisitions issued to this station in last 7 days.
+        -- store_requisitions.requester_location stores yunix_staff.location_name,
+        -- which must match the station name exactly for per-station filtering to work.
+        -- Chef location_name = "Main Kitchen", Barista location_name = "Juice Station", etc.
         SELECT DISTINCT r.inventory_item_id
         FROM store_requisitions r
-        JOIN yunix_staff ys ON ys.id = r.requester_id
         WHERE r.status = 'Issued'
           AND r.purpose = 'Sales'
-          AND ys.role = 'kitchen'
+          AND r.requester_location = ?
           AND r.issued_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
           AND r.inventory_item_id IS NOT NULL
       )
@@ -144,7 +143,7 @@ router.get('/active-list/:stationId', async (req, res) => {
           END
         ) ASC,
         i.name ASC
-    `, lastSnapId ? [lastSnapId] : []);
+    `, lastSnapId ? [lastSnapId, stationName] : [stationName]);
 
     res.json({
       station_id:      stationId,
