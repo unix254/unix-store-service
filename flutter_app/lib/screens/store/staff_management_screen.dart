@@ -788,47 +788,85 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
               ),
               const SizedBox(height: 16),
 
-              // Location — driven by store_stations
+              // Location — driven by store_stations.
+              // If no stations exist yet (new client), falls back gracefully.
+              // If staff has a legacy location_name that doesn't match any station,
+              // it is preserved as a freeform value so saving doesn't silently clear it.
               _stationsLoading
                   ? const Padding(
                       padding: EdgeInsets.symmetric(vertical: 8),
                       child: LinearProgressIndicator(),
                     )
-                  : DropdownButtonFormField<String?>(
-                      value: _stations.any((s) => s['name'] == _locationName)
-                          ? _locationName
-                          : null,
-                      decoration: const InputDecoration(
-                        labelText: 'Station / Location',
-                        hintText: 'Assign to a kitchen station',
-                        prefixIcon: Icon(Icons.kitchen_rounded),
-                      ),
-                      items: [
-                        const DropdownMenuItem<String?>(
-                            value: null, child: Text('Not assigned')),
-                        ..._stations.map((s) => DropdownMenuItem<String?>(
-                              value: s['name'] as String,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    (s['is_active'] == 1 || s['is_active'] == true)
-                                        ? Icons.kitchen_rounded
-                                        : Icons.visibility_off_rounded,
-                                    size: 14,
-                                    color: AppTheme.pinMuted,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(s['name'] as String),
-                                  if (s['is_active'] != 1 && s['is_active'] != true)
-                                    const Text(' (inactive)',
+                  : _stations.isEmpty
+                      // No stations configured — show read-only current value or hint
+                      ? InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: 'Station / Location',
+                            prefixIcon: Icon(Icons.kitchen_rounded),
+                            helperText: 'Add stations in Settings → Kitchen Stations first.',
+                          ),
+                          child: Text(
+                            _locationName ?? 'Not assigned',
+                            style: TextStyle(
+                              color: _locationName != null
+                                  ? const Color(0xFF263238)
+                                  : AppTheme.pinMuted,
+                            ),
+                          ),
+                        )
+                      : DropdownButtonFormField<String?>(
+                          // Preserve legacy location_name even if it doesn't match a station —
+                          // add it as an extra item so it stays selected and isn't silently cleared.
+                          value: _locationName,
+                          decoration: const InputDecoration(
+                            labelText: 'Station / Location',
+                            hintText: 'Assign to a kitchen station',
+                            prefixIcon: Icon(Icons.kitchen_rounded),
+                          ),
+                          items: [
+                            const DropdownMenuItem<String?>(
+                                value: null, child: Text('Not assigned')),
+                            // Include legacy value if it doesn't match any current station
+                            if (_locationName != null &&
+                                _stations.every((s) => s['name'] != _locationName))
+                              DropdownMenuItem<String?>(
+                                value: _locationName,
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.history_rounded,
+                                        size: 14, color: AppTheme.pinMuted),
+                                    const SizedBox(width: 6),
+                                    Text(_locationName!),
+                                    const Text(' (legacy)',
                                         style: TextStyle(
                                             fontSize: 11, color: AppTheme.pinMuted)),
-                                ],
+                                  ],
+                                ),
                               ),
-                            )),
-                      ],
-                      onChanged: (v) => setState(() => _locationName = v),
-                    ),
+                            ..._stations.map((s) => DropdownMenuItem<String?>(
+                                  value: s['name'] as String,
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        (s['is_active'] == 1 || s['is_active'] == true)
+                                            ? Icons.kitchen_rounded
+                                            : Icons.visibility_off_rounded,
+                                        size: 14,
+                                        color: AppTheme.pinMuted,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(s['name'] as String),
+                                      if (s['is_active'] != 1 && s['is_active'] != true)
+                                        const Text(' (inactive)',
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                color: AppTheme.pinMuted)),
+                                    ],
+                                  ),
+                                )),
+                          ],
+                          onChanged: (v) => setState(() => _locationName = v),
+                        ),
               const SizedBox(height: 16),
 
               // Capabilities
