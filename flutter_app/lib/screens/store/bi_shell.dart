@@ -87,16 +87,34 @@ class BIShell extends StatelessWidget {
                   ),
                   tabs: [
                     Tab(
-                      icon: Icon(Icons.analytics_rounded, size: 18),
-                      text: 'Variance Dashboard',
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.analytics_rounded, size: 16),
+                          const SizedBox(width: 6),
+                          const Text('Variance Dashboard'),
+                        ],
+                      ),
                     ),
                     Tab(
-                      icon: Icon(Icons.tune_rounded, size: 18),
-                      text: 'Yield Config',
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.tune_rounded, size: 16),
+                          const SizedBox(width: 6),
+                          const Text('Yield Config'),
+                        ],
+                      ),
                     ),
                     Tab(
-                      icon: Icon(Icons.trending_up_rounded, size: 18),
-                      text: 'Price Impact Advisory',
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.trending_up_rounded, size: 16),
+                          const SizedBox(width: 6),
+                          const Text('Price Impact Advisory'),
+                        ],
+                      ),
                     ),
                   ],
                 ),

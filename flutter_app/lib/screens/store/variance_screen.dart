@@ -295,20 +295,6 @@ class _VarianceHeader extends StatelessWidget {
               Wrap(
                 spacing: 8,
                 children: [
-                  _LegendChip(color: AppTheme.debtRed,   label: 'Over-Consumed'),
-                  _LegendChip(color: AppTheme.paidGreen, label: 'Under-Consumed'),
-                  // Pareto toggle
-                  OutlinedButton.icon(
-                    onPressed: onParetoToggle,
-                    icon: Icon(paretoMode ? Icons.list_rounded : Icons.bar_chart_rounded, size: 16),
-                    label: Text(paretoMode ? 'All Items' : 'Top Offenders',
-                        style: const TextStyle(fontSize: 12)),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.pinTeal,
-                      side: const BorderSide(color: AppTheme.pinTeal),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    ),
-                  ),
                   IconButton(
                     onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
@@ -385,28 +371,23 @@ class _VarianceHeader extends StatelessWidget {
                   onChanged: onStationChange,
                 ),
               ],
+              OutlinedButton.icon(
+                onPressed: onParetoToggle,
+                icon: Icon(paretoMode ? Icons.list_rounded : Icons.bar_chart_rounded, size: 16),
+                label: Text(paretoMode ? 'All Items' : 'Top Offenders',
+                    style: const TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.pinTeal,
+                  side: const BorderSide(color: AppTheme.pinTeal),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+              ),
             ],
           ),
         ],
       ),
     );
   }
-}
-
-class _LegendChip extends StatelessWidget {
-  final Color color;
-  final String label;
-  const _LegendChip({required this.color, required this.label});
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Container(width: 12, height: 12,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-      const SizedBox(width: 5),
-      Text(label, style: const TextStyle(fontSize: 11, color: AppTheme.pinMuted)),
-    ],
-  );
 }
 
 // ── Summary Bar ────────────────────────────────────────────────────────────────
@@ -525,7 +506,7 @@ class _VarianceTableState extends State<_VarianceTable> {
                 Expanded(
                   child: Text(
                     isVerified
-                        ? 'Verified mode — Variance = True Consumption − Expected Consumption (from POS sales). '
+                        ? 'Variance = True Consumption − Expected Consumption (from POS sales). '
                           'True Consumption = Opening Stock + Transfers − Waste − Closing Stock. Business day 7 AM – 7 AM.'
                         : 'Estimated mode — No physical count data found for this period. '
                           'Variance = Transfers Issued − Expected Consumption (from POS sales). '
@@ -606,11 +587,7 @@ class _VarianceTableState extends State<_VarianceTable> {
 
                       final varianceKes = widget.vFn(r, 'variance_kes');
 
-                      final rowBg = isOver
-                          ? AppTheme.debtRed.withValues(alpha: 0.07)
-                          : isUnder
-                              ? AppTheme.paidGreen.withValues(alpha: 0.07)
-                              : (i.isEven ? Colors.white : const Color(0xFFFAFAFA));
+                      final rowBg = i.isEven ? Colors.white : const Color(0xFFFAFAFA);
 
                       final varianceColor = isOver
                           ? AppTheme.debtRed
@@ -656,11 +633,6 @@ class _VarianceTableState extends State<_VarianceTable> {
                               value: (variance >= 0 ? '+' : '') + fmt.format(variance),
                               color: varianceColor,
                               bold: isOver || isUnder,
-                              icon: isOver
-                                  ? Icons.arrow_upward_rounded
-                                  : isUnder
-                                      ? Icons.arrow_downward_rounded
-                                      : null,
                             ),
                             _TD(varianceKes > 0
                                 ? 'KES ${fmtKes.format(varianceKes)}'
@@ -730,24 +702,14 @@ Widget _TDColored({
   required String value,
   required Color color,
   bool bold = false,
-  IconData? icon,
 }) =>
     Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, color: color, size: 14),
-            const SizedBox(width: 4),
-          ],
-          Text(value,
-              style: TextStyle(
-                  fontSize: 13,
-                  color: color,
-                  fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
-        ],
-      ),
+      child: Text(value,
+          style: TextStyle(
+              fontSize: 13,
+              color: color,
+              fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
     );
 
 // ── Empty / Error states ───────────────────────────────────────────────────────

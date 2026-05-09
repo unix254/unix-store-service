@@ -574,7 +574,7 @@ router.get('/ledger', async (req, res) => {
       for (const itemId of itemIds) {
         const meta            = metaMap[itemId] || { name: itemId, unit_of_measure: '—' };
         const opening         = openMap[itemId]    || 0;
-        const morningCount    = morningMap[itemId]  || null; // null = not yet counted
+        const morningCount    = morningMap[itemId]  ?? null; // null = not yet counted; ?? not || so that 0 is a valid count
         const transfers       = xferMap[itemId]     || 0;
         const waste           = wasteMap[itemId]    || 0;
         const closing         = closingMap[itemId]  ?? null; // null = not yet counted
