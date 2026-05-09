@@ -3,7 +3,7 @@ import '../../config/theme.dart';
 import '../../models/staff_member.dart';
 import '../../services/api.dart';
 
-const _kLocations = ['Kitchen', 'Rooftop', 'Barista', 'Main Hall', 'Prep Room', 'Office', 'Cleaning Staff'];
+// Hardcoded list removed — locations are now loaded from store_stations API.
 
 /// Manager-only screen for adding, editing, and deactivating staff PINs.
 class StaffManagementScreen extends StatefulWidget {
@@ -620,6 +620,8 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
   late List<String> _capabilities;
   bool _showPin = false;
   bool _showCapabilities = false;
+  List<Map<String, dynamic>> _stations = [];
+  bool _stationsLoading = true;
 
   bool get _isEdit => widget.existing != null;
 
@@ -633,6 +635,23 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
     _locationName = widget.existing?.locationName;
     _capabilities = widget.existing?.capabilities.toList()
         ?? defaultCapabilities('kitchen');
+    _loadStations();
+  }
+
+  Future<void> _loadStations() async {
+    try {
+      final data = await ApiService.instance.getStations();
+      if (!mounted) return;
+      setState(() {
+        _stations = data;
+        _stationsLoading = false;
+        // If the existing location_name no longer matches any station, keep it
+        // as a freeform value so we don't silently clear it.
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _stationsLoading = false);
+    }
   }
 
   void _onRoleChanged(String role) {
@@ -769,21 +788,47 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
               ),
               const SizedBox(height: 16),
 
-              // Location
-              DropdownButtonFormField<String?>(
-                value: _locationName,
-                decoration: const InputDecoration(
-                  labelText: 'Location (optional)',
-                  prefixIcon: Icon(Icons.location_on_rounded),
-                ),
-                items: [
-                  const DropdownMenuItem<String?>(
-                      value: null, child: Text('Not assigned')),
-                  ..._kLocations.map((l) =>
-                      DropdownMenuItem<String?>(value: l, child: Text(l))),
-                ],
-                onChanged: (v) => setState(() => _locationName = v),
-              ),
+              // Location — driven by store_stations
+              _stationsLoading
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: LinearProgressIndicator(),
+                    )
+                  : DropdownButtonFormField<String?>(
+                      value: _stations.any((s) => s['name'] == _locationName)
+                          ? _locationName
+                          : null,
+                      decoration: const InputDecoration(
+                        labelText: 'Station / Location',
+                        hintText: 'Assign to a kitchen station',
+                        prefixIcon: Icon(Icons.kitchen_rounded),
+                      ),
+                      items: [
+                        const DropdownMenuItem<String?>(
+                            value: null, child: Text('Not assigned')),
+                        ..._stations.map((s) => DropdownMenuItem<String?>(
+                              value: s['name'] as String,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    (s['is_active'] == 1 || s['is_active'] == true)
+                                        ? Icons.kitchen_rounded
+                                        : Icons.visibility_off_rounded,
+                                    size: 14,
+                                    color: AppTheme.pinMuted,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(s['name'] as String),
+                                  if (s['is_active'] != 1 && s['is_active'] != true)
+                                    const Text(' (inactive)',
+                                        style: TextStyle(
+                                            fontSize: 11, color: AppTheme.pinMuted)),
+                                ],
+                              ),
+                            )),
+                      ],
+                      onChanged: (v) => setState(() => _locationName = v),
+                    ),
               const SizedBox(height: 16),
 
               // Capabilities
