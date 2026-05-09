@@ -101,7 +101,7 @@ router.get('/active-list/:stationId', async (req, res) => {
 
     const rows = await query(`
       SELECT DISTINCT
-        i.id,
+        i.id AS inventory_item_id,
         i.name,
         i.unit_of_measure,
         i.cost_per_unit,
