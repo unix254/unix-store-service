@@ -1604,7 +1604,7 @@ class _RequestCard extends StatelessWidget {
 
     final timeFmt = DateFormat('HH:mm');
     final time = req.requestedAt.isNotEmpty
-        ? timeFmt.format(DateTime.tryParse(req.requestedAt) ?? DateTime.now())
+        ? timeFmt.format(DateTime.tryParse(req.requestedAt)?.toLocal() ?? DateTime.now())
         : '–';
 
     return Material(

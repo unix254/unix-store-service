@@ -807,7 +807,7 @@ class _LedgerTable extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(
                         vertical: 12, horizontal: 8),
                     child: Text(
-                      _dateFmt.format(DateTime.tryParse(e.transactionDate) ??
+                      _dateFmt.format(DateTime.tryParse(e.transactionDate)?.toLocal() ??
                           DateTime.now()),
                       style: const TextStyle(fontSize: 13),
                     ),
