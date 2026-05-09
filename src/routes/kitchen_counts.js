@@ -18,13 +18,16 @@ const router = express.Router();
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-// Returns the current business date string YYYY-MM-DD using 7 AM shift.
+// Returns the current business date string YYYY-MM-DD.
+// Business day: 07:00 EAT → 07:00 EAT. Container runs TZ=Africa/Nairobi so
+// new Date() local methods return EAT. Subtracting 7h makes the date roll over
+// at exactly 07:00 EAT (7 AM - 7h = midnight of the same EAT day).
 function todayBusinessDate() {
   const now = new Date();
   const shifted = new Date(now.getTime() - 7 * 60 * 60 * 1000);
-  const y = shifted.getUTCFullYear();
-  const m = String(shifted.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(shifted.getUTCDate()).padStart(2, '0');
+  const y = shifted.getFullYear();
+  const m = String(shifted.getMonth() + 1).padStart(2, '0');
+  const d = String(shifted.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
 
@@ -430,12 +433,12 @@ router.get('/ledger', async (req, res) => {
     return d.toISOString().slice(0, 10);
   })();
 
-  // 7 AM shift boundaries for the requested business date
-  const shiftStart = `${date} 07:00:00`;
+  // Shift boundaries stored as UTC in MariaDB. 07:00 EAT = 04:00 UTC.
+  const shiftStart = `${date} 04:00:00`;
   const shiftEnd   = (() => {
     const d = new Date(date);
     d.setDate(d.getDate() + 1);
-    return `${d.toISOString().slice(0, 10)} 07:00:00`;
+    return `${d.toISOString().slice(0, 10)} 04:00:00`;
   })();
 
   try {

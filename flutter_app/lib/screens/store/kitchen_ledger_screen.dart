@@ -19,10 +19,10 @@ class KitchenLedgerScreen extends StatefulWidget {
   State<KitchenLedgerScreen> createState() => _KitchenLedgerScreenState();
 }
 
-// Mirror the server's todayBusinessDate(): UTC − 7 h, then take the date.
-// Business day runs 07:00 UTC → 07:00 UTC (= 10:00 EAT → 10:00 EAT).
+// Mirror the server's todayBusinessDate(): local EAT time − 7 h.
+// Business day runs 07:00 EAT → 07:00 EAT (7 AM - 7h = midnight of same day).
 DateTime _businessDate() {
-  final shifted = DateTime.now().toUtc().subtract(const Duration(hours: 7));
+  final shifted = DateTime.now().subtract(const Duration(hours: 7));
   return DateTime(shifted.year, shifted.month, shifted.day);
 }
 
