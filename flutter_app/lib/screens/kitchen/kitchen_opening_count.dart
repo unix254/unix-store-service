@@ -46,7 +46,15 @@ class _KitchenOpeningCountState extends State<KitchenOpeningCountScreen> {
     setState(() { _loadingStations = true; _error = null; });
     try {
       final data = await ApiService.instance.getStationsSummary();
-      final stations = data.map((j) => StationSummary.fromJson(j)).toList();
+      var stations = data.map((j) => StationSummary.fromJson(j)).toList();
+
+      // Kitchen staff only see their own station.
+      // Managers, owners and storekeepers see all stations.
+      final loc = widget.staff.locationName;
+      if (widget.staff.isKitchen && loc != null && loc.isNotEmpty) {
+        stations = stations.where((s) => s.name == loc).toList();
+      }
+
       if (!mounted) return;
       setState(() {
         _stations = stations;
@@ -335,26 +343,74 @@ class _StationPickerOpening extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-          child: Text('Select your station for opening confirmation',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700,
+          child: Text('Select your station',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700,
                   color: Colors.grey.shade700)),
         ),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            children: stations.map((s) => Card(
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: const BorderSide(color: Color(0xFFE0E0E0)),
-              ),
-              child: ListTile(
-                leading: const Icon(Icons.store_mall_directory_rounded, color: AppTheme.pinTeal),
-                title: Text(s.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => onSelect(s),
-              ),
-            )).toList(),
+            children: stations.map((s) {
+              final done      = s.openingDone;
+              final confirmed = s.openingConfirmed;
+              return Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(
+                    color: confirmed
+                        ? AppTheme.paidGreen
+                        : done
+                            ? Colors.amber.shade300
+                            : const Color(0xFFE0E0E0),
+                    width: confirmed ? 2 : 1,
+                  ),
+                ),
+                child: ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  leading: CircleAvatar(
+                    backgroundColor: confirmed
+                        ? AppTheme.paidGreen.withValues(alpha: 0.15)
+                        : done
+                            ? Colors.amber.withValues(alpha: 0.15)
+                            : AppTheme.pinTeal.withValues(alpha: 0.12),
+                    child: Icon(
+                      confirmed
+                          ? Icons.check_circle_rounded
+                          : done
+                              ? Icons.pending_rounded
+                              : Icons.wb_sunny_rounded,
+                      color: confirmed
+                          ? AppTheme.paidGreen
+                          : done
+                              ? Colors.amber.shade700
+                              : AppTheme.pinTeal,
+                    ),
+                  ),
+                  title: Text(s.name,
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                  subtitle: Text(
+                    confirmed
+                        ? 'Opening confirmed'
+                        : done
+                            ? 'Submitted — awaiting confirmation'
+                            : 'Opening confirmation not yet done',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: confirmed
+                          ? AppTheme.paidGreen
+                          : done
+                              ? Colors.amber.shade700
+                              : Colors.grey.shade500,
+                    ),
+                  ),
+                  trailing: confirmed
+                      ? null
+                      : const Icon(Icons.chevron_right_rounded),
+                  onTap: confirmed ? null : () => onSelect(s),
+                ),
+              );
+            }).toList(),
           ),
         ),
       ],

@@ -108,6 +108,14 @@ function _buildEstimateVarianceQuery(salesFilter, issuesFilter, locationFilter) 
   const reqWhere = locationFilter
     ? `AND requester_location = ${locationFilter}`
     : '';
+
+  // When a station is selected: only show items that actually had issues to that station.
+  // Without this, ALL yield-config items appear with restaurant-wide expected consumption
+  // alongside zero station-specific issues — meaningless cross-station noise.
+  const havingClause = locationFilter
+    ? `HAVING COALESCE(issued.total_issued, 0) != 0`
+    : '';
+
   return `
     SELECT
       i.id                                AS inventory_item_id,
@@ -166,6 +174,7 @@ function _buildEstimateVarianceQuery(salesFilter, issuesFilter, locationFilter) 
       GROUP BY inventory_item_id
     ) issued ON issued.inventory_item_id = yc.inventory_item_id
     GROUP BY i.id, i.name, i.unit_of_measure, i.cost_per_unit, issued.total_issued
+    ${havingClause}
     ORDER BY ABS(ROUND(
       COALESCE(issued.total_issued, 0) - SUM(COALESCE(sales.total_sold, 0) / yc.portions_per_unit),
       3
@@ -212,13 +221,28 @@ router.get('/variance/range', async (req, res) => {
 
     if (!hasSnapshots) {
       // ── ESTIMATE MODE (v1.1 fallback) ───────────────────────────────────────
-      const locationParam = station_id ? `'${station_id}'` : null;
+      // requester_location stores station NAMES, not UUIDs — look up name first.
+      let estStationName = null;
+      if (station_id) {
+        const snRow = await query(`SELECT name FROM store_stations WHERE id = ?`, [station_id]);
+        estStationName = snRow[0]?.name ?? null;
+      }
+      const locationParam = estStationName
+        ? `'${estStationName.replace(/'/g, "''")}'`
+        : null;
       const sql = _buildEstimateVarianceQuery(
         `r.datenew >= ? AND r.datenew < ?`,
         `issued_at >= ? AND issued_at < ?`,
         locationParam
       );
       const rows = await query(sql, [shiftFrom, shiftTo, shiftFrom, shiftTo]);
+      // mysql2 returns JSON_ARRAYAGG results as raw JSON strings — parse them.
+      rows.forEach(r => {
+        if (typeof r.pos_product_breakdown === 'string') {
+          try { r.pos_product_breakdown = JSON.parse(r.pos_product_breakdown); }
+          catch (_) { r.pos_product_breakdown = []; }
+        }
+      });
       return res.json({ mode: 'estimate', from, to, station_id: station_id || null, rows });
     }
 
@@ -231,12 +255,14 @@ router.get('/variance/range', async (req, res) => {
     //   true_consumption = opening + transfers_in − waste − closing
     //   variance_qty  = true_consumption − expected_consumption (from POS)
 
-    const stationWhere = station_id ? 'AND sk.station_id = ?' : '';
+    const stationWhere  = station_id ? 'AND sk.station_id = ?' : '';
+    const stationWhere2 = station_id ? 'AND sk2.station_id = ?' : '';
     const stationName  = station_id
       ? (await query(`SELECT name FROM store_stations WHERE id = ?`, [station_id]))[0]?.name
       : null;
+    // NOTE: store_requisitions subqueries have no alias — do NOT use "r." prefix here.
     const locationWhere = stationName
-      ? `AND r.requester_location = '${stationName.replace(/'/g, "''")}'`
+      ? `AND requester_location = '${stationName.replace(/'/g, "''")}'`
       : '';
 
     const rows = await query(`
@@ -326,7 +352,7 @@ router.get('/variance/range', async (req, res) => {
             SELECT sk2.id FROM store_kitchen_snapshots sk2
             WHERE sk2.snapshot_type = 'CLOSING' AND sk2.status = 'CONFIRMED'
               AND sk2.snapshot_date < ?
-              ${stationWhere}
+              ${stationWhere2}
             ORDER BY sk2.snapshot_date DESC LIMIT 1
           )
       ) opening_snap ON opening_snap.inventory_item_id = yc.inventory_item_id
@@ -343,7 +369,7 @@ router.get('/variance/range', async (req, res) => {
             SELECT sk2.id FROM store_kitchen_snapshots sk2
             WHERE sk2.snapshot_type = 'CLOSING' AND sk2.status = 'CONFIRMED'
               AND sk2.snapshot_date >= ? AND sk2.snapshot_date <= ?
-              ${stationWhere}
+              ${stationWhere2}
             ORDER BY sk2.snapshot_date DESC LIMIT 1
           )
       ) closing_snap ON closing_snap.inventory_item_id = yc.inventory_item_id
@@ -375,12 +401,36 @@ router.get('/variance/range', async (req, res) => {
       GROUP BY i.id, i.name, i.unit_of_measure, i.cost_per_unit,
                opening_snap.opening_qty, xfer.total_xfer, waste.total_waste, closing_snap.closing_qty
 
+      -- When filtering by station: only show items that have actual data for that station.
+      -- Items with no snapshot, no transfers, and no waste at the selected station are noise.
+      ${stationWhere ? `HAVING (
+        opening_snap.opening_qty IS NOT NULL
+        OR closing_snap.closing_qty IS NOT NULL
+        OR xfer.total_xfer           IS NOT NULL
+        OR waste.total_waste         IS NOT NULL
+      )` : ''}
+
       ORDER BY variance_kes DESC
     `, station_id
-      ? [shiftFrom, shiftTo, from, from, station_id, from, to, station_id, from, to, station_id, from, to, station_id, shiftFrom, shiftTo, shiftFrom, shiftTo]
+      // 16 params — one per ? in order:
+      // 1-2: POS sales window (shiftFrom, shiftTo)
+      // 3-4: opening outer (from, station_id)
+      // 5-6: opening inner (from, station_id)
+      // 7-9: closing outer (from, to, station_id)
+      // 10-12: closing inner (from, to, station_id)
+      // 13-14: xfer window (shiftFrom, shiftTo)
+      // 15-16: waste window (shiftFrom, shiftTo)
+      ? [shiftFrom, shiftTo, from, station_id, from, station_id, from, to, station_id, from, to, station_id, shiftFrom, shiftTo, shiftFrom, shiftTo]
       : [shiftFrom, shiftTo, from, from, from, to, from, to, shiftFrom, shiftTo, shiftFrom, shiftTo]
     );
 
+    // mysql2 returns JSON_ARRAYAGG results as raw JSON strings — parse them.
+    rows.forEach(r => {
+      if (typeof r.pos_product_breakdown === 'string') {
+        try { r.pos_product_breakdown = JSON.parse(r.pos_product_breakdown); }
+        catch (_) { r.pos_product_breakdown = []; }
+      }
+    });
     res.json({ mode: 'verified', from, to, station_id: station_id || null, rows });
   } catch (err) {
     console.error(err);

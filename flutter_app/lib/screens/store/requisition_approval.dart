@@ -593,7 +593,8 @@ class _RequisitionCard extends StatelessWidget {
                   const SizedBox(height: 6),
                   // Meta row
                   Wrap(
-                    spacing: 14,
+                    spacing: 8,
+                    runSpacing: 4,
                     children: [
                       _MetaChip(
                         icon: Icons.person_rounded,
@@ -603,6 +604,13 @@ class _RequisitionCard extends StatelessWidget {
                         icon: Icons.access_time_rounded,
                         label: _formatTime(req.requestedAt),
                       ),
+                      if (req.requesterLocation != null &&
+                          req.requesterLocation!.isNotEmpty)
+                        _MetaChip(
+                          icon: Icons.store_mall_directory_rounded,
+                          label: req.requesterLocation!,
+                          color: AppTheme.pinTeal,
+                        ),
                       _PurposeBadge(purpose: req.purpose),
                       if (req.notes != null && req.notes!.isNotEmpty)
                         _MetaChip(
@@ -611,6 +619,14 @@ class _RequisitionCard extends StatelessWidget {
                         ),
                     ],
                   ),
+                  // ── Stock Balance Strip ────────────────────────
+                  // Only shown for standard requests (not new-item) when
+                  // we have store qty. Gives the storekeeper the key
+                  // numbers needed to approve without opening inventory.
+                  if (!req.isNewItemRequest && req.storeQty != null) ...[
+                    const SizedBox(height: 8),
+                    _StockBalanceStrip(req: req),
+                  ],
                   // Issued / adjusted info
                   if (req.isIssued && req.issuedBy != null) ...[
                     Padding(
@@ -852,17 +868,104 @@ class _PurposeBadge extends StatelessWidget {
 class _MetaChip extends StatelessWidget {
   final IconData icon;
   final String label;
-  const _MetaChip({required this.icon, required this.label});
+  /// Optional accent color — when set the icon and text use this color instead of grey.
+  final Color? color;
+  const _MetaChip({required this.icon, required this.label, this.color});
 
   @override
   Widget build(BuildContext context) {
+    final c = color ?? Colors.grey.shade500;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 13, color: Colors.grey.shade500),
+        Icon(icon, size: 13, color: c),
         const SizedBox(width: 4),
         Text(label,
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+            style: TextStyle(
+              fontSize: 12,
+              color: color != null ? c : Colors.grey.shade600,
+              fontWeight: color != null ? FontWeight.w600 : FontWeight.w400,
+            )),
+      ],
+    );
+  }
+}
+
+// ── Stock Balance Strip ────────────────────────────────────────────────────────
+// Shows current store inventory and station closing stock for a requisition.
+// Gives the storekeeper at-a-glance signal before approving.
+class _StockBalanceStrip extends StatelessWidget {
+  final Requisition req;
+  const _StockBalanceStrip({required this.req});
+
+  String _fmt(double v) =>
+      v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+
+  @override
+  Widget build(BuildContext context) {
+    final uom        = req.unitOfMeasure ?? req.itemUom ?? '';
+    final storeQty   = req.storeQty!;
+    final storeOk    = storeQty >= req.quantity;
+    final storeColor = storeOk ? AppTheme.paidGreen : AppTheme.debtRed;
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: [
+        // Store balance pill
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: storeColor.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: storeColor.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.inventory_2_rounded, size: 12, color: storeColor),
+              const SizedBox(width: 5),
+              Text('Store: ',
+                  style: TextStyle(
+                      fontSize: 11, color: storeColor,
+                      fontWeight: FontWeight.w600)),
+              Text('${_fmt(storeQty)} $uom',
+                  style: TextStyle(
+                      fontSize: 11, color: storeColor,
+                      fontWeight: FontWeight.w800)),
+              if (!storeOk) ...[
+                const SizedBox(width: 4),
+                Icon(Icons.warning_rounded, size: 11, color: storeColor),
+              ],
+            ],
+          ),
+        ),
+        // Station balance pill (only when station stock data exists)
+        if (req.stationQty != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: AppTheme.pinTeal.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.pinTeal.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.store_mall_directory_rounded,
+                    size: 12, color: AppTheme.pinTeal),
+                const SizedBox(width: 5),
+                Text('${req.requesterLocation ?? 'Station'}: ',
+                    style: const TextStyle(
+                        fontSize: 11, color: AppTheme.pinTeal,
+                        fontWeight: FontWeight.w600)),
+                Text('${_fmt(req.stationQty!)} $uom',
+                    style: const TextStyle(
+                        fontSize: 11, color: AppTheme.pinTeal,
+                        fontWeight: FontWeight.w800)),
+              ],
+            ),
+          ),
       ],
     );
   }

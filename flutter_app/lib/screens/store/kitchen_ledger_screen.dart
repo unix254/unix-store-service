@@ -36,6 +36,8 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
   DateTime _selectedDate = _businessDate();
   String? _filterStationId;
   String? _filterStationName;
+  String _searchQuery = '';
+  final TextEditingController _searchCtrl = TextEditingController();
 
   bool _confirming = false;
 
@@ -44,6 +46,21 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
     super.initState();
     _loadStations();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<KitchenLedgerRow> get _filteredRows {
+    if (_searchQuery.isEmpty) return _rows;
+    final q = _searchQuery.toLowerCase();
+    return _rows.where((r) =>
+      r.itemName.toLowerCase().contains(q) ||
+      r.stationName.toLowerCase().contains(q),
+    ).toList();
   }
 
   String get _dateStr {
@@ -314,7 +331,7 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
                 ],
               ),
               const SizedBox(height: 12),
-              // Date + station filters
+              // Date + station + search filters
               Wrap(
                 spacing: 10,
                 runSpacing: 8,
@@ -368,6 +385,44 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
                       _load();
                     },
                   ),
+                  // Search field
+                  SizedBox(
+                    width: 200,
+                    child: TextField(
+                      controller: _searchCtrl,
+                      onChanged: (q) => setState(() => _searchQuery = q),
+                      decoration: InputDecoration(
+                        hintText: 'Search items…',
+                        hintStyle: const TextStyle(fontSize: 12, color: AppTheme.pinMuted),
+                        prefixIcon: const Icon(Icons.search_rounded, size: 17, color: AppTheme.pinMuted),
+                        suffixIcon: _searchCtrl.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.close_rounded, size: 15),
+                                onPressed: () { _searchCtrl.clear(); setState(() => _searchQuery = ''); },
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              )
+                            : null,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: AppTheme.pinTeal),
+                        ),
+                      ),
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
                   const Text(
                     'Business day: 07:00 AM → 07:00 AM',
                     style: TextStyle(fontSize: 11, color: AppTheme.pinMuted),
@@ -397,7 +452,19 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
               ? const Center(child: CircularProgressIndicator())
               : _rows.isEmpty
                   ? _EmptyState(date: fmt.format(_selectedDate))
-                  : _LedgerTable(rows: _rows),
+                  : _filteredRows.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.search_off_rounded, size: 56, color: Colors.grey.shade300),
+                              const SizedBox(height: 12),
+                              Text('No items match "$_searchQuery"',
+                                  style: TextStyle(fontSize: 15, color: Colors.grey.shade500)),
+                            ],
+                          ),
+                        )
+                      : _LedgerTable(rows: _filteredRows),
         ),
       ],
     );

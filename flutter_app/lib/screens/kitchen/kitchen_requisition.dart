@@ -44,6 +44,10 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
   bool _submitting = false;
   String? _submitError;
 
+  /// Map of inventory_item_id → station_qty from the latest confirmed closing
+  /// snapshot at the staff's station. Empty if no station or no snapshot yet.
+  Map<String, double> _stationStock = {};
+
   @override
   void initState() {
     super.initState();
@@ -65,6 +69,36 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
       setState(() => _loadingItems = false);
     }
     _loadMyRequests();
+    _loadStationStock();
+  }
+
+  /// If the staff member has a kitchen station, load the latest confirmed
+  /// closing snapshot to show current station stock on each item tile.
+  Future<void> _loadStationStock() async {
+    final loc = widget.staff.locationName;
+    if (loc == null || loc.isEmpty) return;
+    try {
+      // Resolve station name → station ID via the summary list
+      final summaries = await ApiService.instance.getStationsSummary();
+      final match = summaries.firstWhere(
+        (s) => s['name'] == loc,
+        orElse: () => {},
+      );
+      final stationId = match['id'] as String?;
+      if (stationId == null) return;
+
+      final data = await ApiService.instance.getStationStock(stationId);
+      final rawItems = data['items'] as List? ?? [];
+      final stockMap = <String, double>{};
+      for (final item in rawItems) {
+        final id  = item['inventory_item_id'] as String?;
+        final qty = double.tryParse(item['station_qty']?.toString() ?? '');
+        if (id != null && qty != null) stockMap[id] = qty;
+      }
+      if (mounted) setState(() => _stationStock = stockMap);
+    } catch (_) {
+      // Non-critical — station stock is informational only; fail silently
+    }
   }
 
   Future<void> _showNewItemRequestDialog() async {
@@ -519,6 +553,7 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
                               search:             _search,
                               basket:             _basket,
                               isMobile:           isMobile,
+                              stationStock:       _stationStock,
                               onSelect:           _selectItem,
                               onAdjustQty:        _adjustQty,
                               onEditQty:          _editQtyDirect,
@@ -652,6 +687,7 @@ class _Body extends StatelessWidget {
   final String search;
   final List<_BasketItem> basket;
   final bool isMobile;
+  final Map<String, double> stationStock;
   final void Function(InventoryItem) onSelect;
   final void Function(double) onAdjustQty;
   final VoidCallback onEditQty;
@@ -677,6 +713,7 @@ class _Body extends StatelessWidget {
     required this.search,
     required this.basket,
     required this.isMobile,
+    required this.stationStock,
     required this.onSelect,
     required this.onAdjustQty,
     required this.onEditQty,
@@ -702,6 +739,7 @@ class _Body extends StatelessWidget {
       submitError:        submitError,
       search:             search,
       basket:             basket,
+      stationStock:       stationStock,
       onSelect:           onSelect,
       onAdjustQty:        onAdjustQty,
       onEditQty:          onEditQty,
@@ -749,6 +787,7 @@ class _RequestForm extends StatelessWidget {
   final String? submitError;
   final String search;
   final List<_BasketItem> basket;
+  final Map<String, double> stationStock;
   final void Function(InventoryItem) onSelect;
   final void Function(double) onAdjustQty;
   final VoidCallback onEditQty;
@@ -769,6 +808,7 @@ class _RequestForm extends StatelessWidget {
     required this.submitError,
     required this.search,
     required this.basket,
+    required this.stationStock,
     required this.onSelect,
     required this.onAdjustQty,
     required this.onEditQty,
@@ -840,7 +880,8 @@ class _RequestForm extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          _ItemGrid(items: filteredItems, picked: picked, onSelect: onSelect),
+          _ItemGrid(items: filteredItems, picked: picked, onSelect: onSelect,
+              stationStock: stationStock),
           const SizedBox(height: 24),
 
           // ── Sections 2 & 3 only when item is picked ────────
@@ -1202,10 +1243,15 @@ class _QtyInputDialogState extends State<_QtyInputDialog> {
 class _ItemGrid extends StatelessWidget {
   final List<InventoryItem> items;
   final InventoryItem? picked;
+  final Map<String, double> stationStock;
   final void Function(InventoryItem) onSelect;
 
-  const _ItemGrid(
-      {required this.items, required this.picked, required this.onSelect});
+  const _ItemGrid({
+    required this.items,
+    required this.picked,
+    required this.onSelect,
+    this.stationStock = const {},
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1217,7 +1263,10 @@ class _ItemGrid extends StatelessWidget {
       physics: isMobile ? const BouncingScrollPhysics() : const NeverScrollableScrollPhysics(),
       gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: isMobile ? (query.size.width / 2) : 150,
-        mainAxisExtent: isMobile ? 70 : 80, // reduced to fit more items
+        // Extra height when station stock is present (teal line below store line)
+        mainAxisExtent: stationStock.isNotEmpty
+            ? (isMobile ? 85 : 96)
+            : (isMobile ? 70 : 80),
         crossAxisSpacing: 10,
         mainAxisSpacing: 10,
       ),
@@ -1226,6 +1275,7 @@ class _ItemGrid extends StatelessWidget {
         final item = items[index];
         final isSelected = picked?.id == item.id;
         final isLow = item.needsReorder;
+        final stationQty = stationStock[item.id];
         return GestureDetector(
           onTap: () => onSelect(item),
           child: AnimatedContainer(
@@ -1262,6 +1312,7 @@ class _ItemGrid extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 4),
+                // Store stock
                 Row(
                   children: [
                     Icon(
@@ -1270,16 +1321,41 @@ class _ItemGrid extends StatelessWidget {
                       color: isLow ? AppTheme.debtRed : AppTheme.pinMuted,
                     ),
                     const SizedBox(width: 4),
-                    Text(
-                      item.stockLabel,
-                      style: TextStyle(
-                        color: isLow ? AppTheme.debtRed : AppTheme.pinMuted,
-                        fontSize: isMobile ? 11 : 12,
-                        fontWeight: FontWeight.w600,
+                    Expanded(
+                      child: Text(
+                        item.stockLabel,
+                        style: TextStyle(
+                          color: isLow ? AppTheme.debtRed : AppTheme.pinMuted,
+                          fontSize: isMobile ? 11 : 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
                 ),
+                // Station stock (shown only when data is available)
+                if (stationQty != null) ...[
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      const Icon(Icons.store_mall_directory_rounded,
+                          size: 11, color: AppTheme.pinTeal),
+                      const SizedBox(width: 3),
+                      Expanded(
+                        child: Text(
+                          '${stationQty.toStringAsFixed(stationQty % 1 == 0 ? 0 : 1)} ${item.unitOfMeasure}',
+                          style: TextStyle(
+                            color: AppTheme.pinTeal,
+                            fontSize: isMobile ? 10 : 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),

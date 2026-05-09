@@ -79,6 +79,9 @@ class _StoreShellState extends State<StoreShell> {
     return [
       if (s.canApproveRequisitions)
         (icon: Icons.assignment_rounded,   label: 'Requisitions',    item: _NavItem.requisitions),
+      // Kitchen Ledger sits immediately below Requisitions for fast daily access
+      if (s.canAccessBI || s.canApproveRequisitions)
+        (icon: Icons.receipt_long_rounded, label: 'Kitchen Ledger', item: _NavItem.kitchenLedger),
       if (s.canManageInventory || s.canDraftPO) ...[
         (icon: Icons.people_alt_rounded,   label: 'Suppliers',       item: _NavItem.suppliers),
         (icon: Icons.inventory_2_rounded,  label: 'Inventory',       item: _NavItem.inventory),
@@ -95,8 +98,6 @@ class _StoreShellState extends State<StoreShell> {
       // Phase 10: Expense Accounts — manager float / Cash-In workflows
       if (s.canManageExpenseAccounts)
         (icon: Icons.account_balance_wallet_rounded, label: 'Expense Accounts', item: _NavItem.expenseAccounts),
-      if (s.canAccessBI || s.canApproveRequisitions)
-        (icon: Icons.receipt_long_rounded, label: 'Kitchen Ledger', item: _NavItem.kitchenLedger),
       if (s.canManageStaff)
         (icon: Icons.settings_rounded,         label: 'Settings',          item: _NavItem.settings),
     ];

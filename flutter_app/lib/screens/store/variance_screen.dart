@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../config/theme.dart';
@@ -80,6 +81,8 @@ class _VarianceScreenState extends State<VarianceScreen> {
   DateTimeRange? _customRange;
   String? _stationId;
   bool _paretoMode = false; // false = All Items, true = Top Offenders
+  String _searchQuery = '';
+  final TextEditingController _searchCtrl = TextEditingController();
 
   List<Map<String, dynamic>> _stations = [];
 
@@ -88,6 +91,12 @@ class _VarianceScreenState extends State<VarianceScreen> {
     super.initState();
     _loadStations();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _loadStations() async {
@@ -150,18 +159,32 @@ class _VarianceScreenState extends State<VarianceScreen> {
       double.tryParse(r[key]?.toString() ?? '0') ?? 0.0;
 
   List<Map<String, dynamic>> get _displayRows {
-    if (!_paretoMode) return _rows;
-    // Top offenders: top 5 by absolute KES variance, descending
-    final sorted = List<Map<String, dynamic>>.from(_rows)
-      ..sort((a, b) => _v(b, 'variance_kes').abs().compareTo(_v(a, 'variance_kes').abs()));
-    return sorted.take(5).toList();
+    // Step 1: pareto filter
+    List<Map<String, dynamic>> rows;
+    if (_paretoMode) {
+      final sorted = List<Map<String, dynamic>>.from(_rows)
+        ..sort((a, b) => _v(b, 'variance_kes').abs().compareTo(_v(a, 'variance_kes').abs()));
+      rows = sorted.take(5).toList();
+    } else {
+      rows = _rows;
+    }
+    // Step 2: search filter
+    if (_searchQuery.isNotEmpty) {
+      final q = _searchQuery.toLowerCase();
+      rows = rows.where((r) =>
+        (r['inventory_item_name']?.toString().toLowerCase().contains(q) ?? false) ||
+        (r['pos_product_name']?.toString().toLowerCase().contains(q) ?? false),
+      ).toList();
+    }
+    return rows;
   }
 
   @override
   Widget build(BuildContext context) {
-    final overIssued  = _rows.where((r) => _v(r, 'variance_qty') > 0.05).length;
-    final underIssued = _rows.where((r) => _v(r, 'variance_qty') < -0.05).length;
-    final onTrack     = _rows.length - overIssued - underIssued;
+    final displayed   = _displayRows;
+    final overIssued  = displayed.where((r) => _v(r, 'variance_qty') > 0.05).length;
+    final underIssued = displayed.where((r) => _v(r, 'variance_qty') < -0.05).length;
+    final onTrack     = displayed.length - overIssued - underIssued;
     final pd          = _periodDates(_period, _customRange);
 
     return Column(
@@ -184,8 +207,10 @@ class _VarianceScreenState extends State<VarianceScreen> {
 
         if (!_loading && _error == null && _rows.isNotEmpty)
           _SummaryBar(
-            total: _rows.length, overIssued: overIssued,
+            total: displayed.length, overIssued: overIssued,
             underIssued: underIssued, onTrack: onTrack, mode: _mode,
+            searchController: _searchCtrl,
+            onSearchChanged: (q) => setState(() => _searchQuery = q),
           ),
 
         Expanded(
@@ -193,9 +218,9 @@ class _VarianceScreenState extends State<VarianceScreen> {
               ? const Center(child: CircularProgressIndicator())
               : _error != null
                   ? _ErrorState(error: _error!, onRetry: _load)
-                  : _rows.isEmpty
+                  : displayed.isEmpty
                       ? const _EmptyState()
-                      : _VarianceTable(rows: _displayRows, vFn: _v, mode: _mode,
+                      : _VarianceTable(rows: displayed, vFn: _v, mode: _mode,
                           paretoMode: _paretoMode),
         ),
       ],
@@ -395,26 +420,79 @@ class _VarianceHeader extends StatelessWidget {
 class _SummaryBar extends StatelessWidget {
   final int total, overIssued, underIssued, onTrack;
   final String mode;
+  final TextEditingController searchController;
+  final void Function(String) onSearchChanged;
+
   const _SummaryBar({
     required this.total, required this.overIssued,
     required this.underIssued, required this.onTrack, required this.mode,
+    required this.searchController, required this.onSearchChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       color: const Color(0xFFF5F5F5),
-      child: Wrap(
-        spacing: 12, runSpacing: 12,
+      child: Row(
         children: [
-          _StatChip(label: 'Items Tracked', value: total.toString(), color: AppTheme.pinTeal),
-          _StatChip(label: 'Over-Consumed', value: overIssued.toString(),
-              color: overIssued > 0 ? AppTheme.debtRed : Colors.grey),
-          _StatChip(label: 'Under-Consumed', value: underIssued.toString(),
-              color: underIssued > 0 ? AppTheme.paidGreen : Colors.grey),
-          _StatChip(label: 'On Track', value: onTrack.toString(), color: Colors.blueGrey),
+          Expanded(
+            child: Wrap(
+              spacing: 10, runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                _StatChip(label: 'Items Tracked', value: total.toString(), color: AppTheme.pinTeal),
+                _StatChip(label: 'Over-Consumed', value: overIssued.toString(),
+                    color: overIssued > 0 ? AppTheme.debtRed : Colors.grey),
+                _StatChip(label: 'Under-Consumed', value: underIssued.toString(),
+                    color: underIssued > 0 ? AppTheme.paidGreen : Colors.grey),
+                _StatChip(label: 'On Track', value: onTrack.toString(), color: Colors.blueGrey),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          // Search field
+          SizedBox(
+            width: 210,
+            child: TextField(
+              controller: searchController,
+              onChanged: onSearchChanged,
+              decoration: InputDecoration(
+                hintText: 'Search items…',
+                hintStyle: const TextStyle(fontSize: 12, color: AppTheme.pinMuted),
+                prefixIcon: const Icon(Icons.search_rounded, size: 18, color: AppTheme.pinMuted),
+                suffixIcon: searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 16),
+                        onPressed: () {
+                          searchController.clear();
+                          onSearchChanged('');
+                        },
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                      )
+                    : null,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: AppTheme.pinTeal),
+                ),
+              ),
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
         ],
       ),
     );
@@ -468,11 +546,32 @@ class _VarianceTableState extends State<_VarianceTable> {
   // Tracks which rows have their POS product breakdown expanded
   final Set<String> _expanded = {};
 
+  /// Returns a display string for the POS Product(s) column.
+  /// Shows up to 2 product names; if there are more it appends "+N more".
+  /// Using the already-parsed breakdown rather than the raw concatenated SQL string.
+  String _posProductLabel(List<Map<String, dynamic>> breakdown) {
+    if (breakdown.isEmpty) return '—';
+    const maxShow = 2;
+    final names = breakdown
+        .map((b) => b['pos_product_name']?.toString() ?? '')
+        .where((n) => n.isNotEmpty)
+        .toList();
+    if (names.isEmpty) return '—';
+    if (names.length <= maxShow) return names.join(' / ');
+    return '${names.take(maxShow).join(' / ')}  +${names.length - maxShow} more';
+  }
+
   List<Map<String, dynamic>> _parsedBreakdown(Map<String, dynamic> row) {
     final raw = row['pos_product_breakdown'];
     if (raw == null) return [];
     try {
+      // Backend parses JSON_ARRAYAGG strings before sending, but handle String
+      // defensively in case an older cached response or edge case slips through.
       if (raw is List) return raw.cast<Map<String, dynamic>>();
+      if (raw is String) {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) return decoded.cast<Map<String, dynamic>>();
+      }
       return [];
     } catch (_) {
       return [];
@@ -482,7 +581,7 @@ class _VarianceTableState extends State<_VarianceTable> {
   @override
   Widget build(BuildContext context) {
     final fmt = NumberFormat('0.###');
-    final fmtKes = NumberFormat('#,##0.00');
+    final fmtKesInt = NumberFormat('#,##0'); // whole shillings, no decimals
     final isVerified = widget.mode == 'verified';
 
     return SingleChildScrollView(
@@ -551,8 +650,8 @@ class _VarianceTableState extends State<_VarianceTable> {
                   ),
                   columnWidths: {
                     0: const FlexColumnWidth(0.4), // expand
-                    1: const FlexColumnWidth(2.0), // POS Product(s)
-                    2: const FlexColumnWidth(1.8), // Store Item
+                    1: const FlexColumnWidth(1.8), // Store Item
+                    2: const FlexColumnWidth(2.0), // POS Product(s)
                     3: const FlexColumnWidth(1.2), // Expected Consumption
                     4: const FlexColumnWidth(1.2), // True Consumption
                     5: const FlexColumnWidth(1.2), // Variance
@@ -565,10 +664,10 @@ class _VarianceTableState extends State<_VarianceTable> {
                       decoration: const BoxDecoration(color: Color(0xFF37474F)),
                       children: [
                         _TH(''),
-                        _TH('POS Product(s)'),
                         _TH('Store Item'),
+                        _TH('POS Product(s)'),
                         _TH('Expected Consumption\n(from POS sales)'),
-                        _TH(isVerified ? 'True Consumption' : 'Actual Issues'),
+                        _TH('True Consumption'),
                         _TH('Variance'),
                         _TH('KES Impact'),
                         _TH('UOM'),
@@ -583,7 +682,9 @@ class _VarianceTableState extends State<_VarianceTable> {
                       final isUnder   = variance < -0.05;
                       final isExpanded = _expanded.contains(itemId);
                       final breakdown = _parsedBreakdown(r);
-                      final hasBreakdown = breakdown.length > 1;
+                      // Show expand for any item with breakdown data (even single product)
+                      // so users can confirm which POS product drives consumption.
+                      final hasBreakdown = breakdown.isNotEmpty;
 
                       final varianceKes = widget.vFn(r, 'variance_kes');
 
@@ -622,9 +723,10 @@ class _VarianceTableState extends State<_VarianceTable> {
                                     )
                                   : const SizedBox(),
                             ),
-                            _TD(r['pos_product_name']?.toString() ?? '—'),
-                            _TD(r['inventory_item_name']?.toString() ?? '—',
-                                bold: true),
+                            // col 1: Store Item (now first)
+                            _TD(r['inventory_item_name']?.toString() ?? '—', bold: true),
+                            // col 2: POS Product(s) — show up to 2, then "+N more"
+                            _TD(_posProductLabel(breakdown)),
                             _TD(fmt.format(widget.vFn(r, 'expected_consumption'))),
                             _TD(r[trueConsumptionKey] != null
                                 ? fmt.format(widget.vFn(r, trueConsumptionKey))
@@ -634,8 +736,9 @@ class _VarianceTableState extends State<_VarianceTable> {
                               color: varianceColor,
                               bold: isOver || isUnder,
                             ),
+                            // KES Impact: whole shillings, no currency prefix
                             _TD(varianceKes > 0
-                                ? 'KES ${fmtKes.format(varianceKes)}'
+                                ? fmtKesInt.format(varianceKes.round())
                                 : '—',
                                 color: varianceKes > 50 ? AppTheme.debtRed : null),
                             _TD(r['unit_of_measure']?.toString() ?? '—', muted: true),
@@ -644,11 +747,11 @@ class _VarianceTableState extends State<_VarianceTable> {
                         // Expanded breakdown rows
                         if (isExpanded && hasBreakdown)
                           ...breakdown.map((b) => TableRow(
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF0F7FF),
-                            ),
+                            decoration: const BoxDecoration(color: Color(0xFFF0F7FF)),
                             children: [
-                              _TD(''),
+                              _TD(''),          // col 0: expand (blank)
+                              _TD(''),          // col 1: Store Item (blank — shown on parent row)
+                              // col 2: POS product name indented
                               Padding(
                                 padding: const EdgeInsets.only(left: 28, top: 8, bottom: 8, right: 14),
                                 child: Text(
@@ -658,13 +761,13 @@ class _VarianceTableState extends State<_VarianceTable> {
                                       fontStyle: FontStyle.italic),
                                 ),
                               ),
-                              _TD(''),
+                              // col 3: expected qty for this POS product
                               _TD(fmt.format(
                                   double.tryParse(b['expected_qty']?.toString() ?? '0') ?? 0)),
-                              _TD(''),
-                              _TD(''),
-                              _TD(''),
-                              _TD(''),
+                              _TD(''),  // col 4
+                              _TD(''),  // col 5
+                              _TD(''),  // col 6
+                              _TD(''),  // col 7
                             ],
                           )),
                       ];

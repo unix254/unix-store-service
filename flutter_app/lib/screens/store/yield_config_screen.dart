@@ -18,11 +18,28 @@ class _YieldConfigScreenState extends State<YieldConfigScreen> {
   List<PosProduct>     _products   = [];
   bool _loading = true;
   bool _posError = false; // true if POS products couldn't be loaded
+  String _searchQuery = '';
+  final TextEditingController _searchCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _loadAll();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<YieldConfig> get _filteredConfigs {
+    if (_searchQuery.isEmpty) return _configs;
+    final q = _searchQuery.toLowerCase();
+    return _configs.where((c) =>
+      c.inventoryItemName.toLowerCase().contains(q) ||
+      (c.posProductName?.toLowerCase().contains(q) ?? false),
+    ).toList();
   }
 
   Future<void> _loadAll() async {
@@ -131,46 +148,85 @@ class _YieldConfigScreenState extends State<YieldConfigScreen> {
         Container(
           color: AppTheme.surface,
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final isMobile = constraints.maxWidth < 600;
-              final titleWidget = Row(
-                children: [
-                  const Text('Yield Configuration',
-                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    icon: const Icon(Icons.refresh_rounded),
-                    onPressed: _loadAll,
-                    tooltip: 'Refresh',
-                    color: AppTheme.primary,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Title row + Add button
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final isMobile = constraints.maxWidth < 600;
+                  final titleWidget = Row(
+                    children: [
+                      const Text('Yield Configuration',
+                          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.refresh_rounded),
+                        onPressed: _loadAll,
+                        tooltip: 'Refresh',
+                        color: AppTheme.primary,
+                      ),
+                    ],
+                  );
+                  final actionWidget = ElevatedButton.icon(
+                    onPressed: _showAddDialog,
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('Add Mapping'),
+                  );
+                  if (isMobile) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [titleWidget, const SizedBox(height: 12), actionWidget],
+                    );
+                  } else {
+                    return Row(
+                      children: [Expanded(child: titleWidget), actionWidget],
+                    );
+                  }
+                },
+              ),
+              if (_configs.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                // Search bar
+                SizedBox(
+                  width: 300,
+                  child: TextField(
+                    controller: _searchCtrl,
+                    onChanged: (q) => setState(() => _searchQuery = q),
+                    decoration: InputDecoration(
+                      hintText: 'Search yield configs…',
+                      hintStyle: const TextStyle(fontSize: 13, color: AppTheme.pinMuted),
+                      prefixIcon: const Icon(Icons.search_rounded, size: 18, color: AppTheme.pinMuted),
+                      suffixIcon: _searchCtrl.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.close_rounded, size: 16),
+                              onPressed: () { _searchCtrl.clear(); setState(() => _searchQuery = ''); },
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                            )
+                          : null,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: AppTheme.pinTeal),
+                      ),
+                    ),
+                    style: const TextStyle(fontSize: 13),
                   ),
-                ],
-              );
-              final actionWidget = ElevatedButton.icon(
-                onPressed: _showAddDialog,
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add Mapping'),
-              );
-              
-              if (isMobile) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    titleWidget,
-                    const SizedBox(height: 12),
-                    actionWidget,
-                  ],
-                );
-              } else {
-                return Row(
-                  children: [
-                    Expanded(child: titleWidget),
-                    actionWidget,
-                  ],
-                );
-              }
-            },
+                ),
+              ],
+            ],
           ),
         ),
 
@@ -185,11 +241,23 @@ class _YieldConfigScreenState extends State<YieldConfigScreen> {
               ? const Center(child: CircularProgressIndicator())
               : _configs.isEmpty
                   ? _EmptyYieldState(onAdd: _showAddDialog)
-                  : _ConfigGrid(
-                      configs:   _configs,
-                      onEdit:    _editConfig,
-                      onDelete:  _deleteConfig,
-                    ),
+                  : _filteredConfigs.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.search_off_rounded, size: 56, color: Colors.grey.shade300),
+                              const SizedBox(height: 12),
+                              Text('No configs match "$_searchQuery"',
+                                  style: TextStyle(fontSize: 15, color: Colors.grey.shade500)),
+                            ],
+                          ),
+                        )
+                      : _ConfigGrid(
+                          configs:   _filteredConfigs,
+                          onEdit:    _editConfig,
+                          onDelete:  _deleteConfig,
+                        ),
         ),
       ],
     );

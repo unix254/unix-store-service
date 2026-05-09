@@ -617,6 +617,43 @@ router.get('/ledger', async (req, res) => {
   }
 });
 
+// ── GET /api/kitchen-counts/station-stock/:stationId ─────────────────────────
+// Returns the most recent CONFIRMED closing snapshot items for a station.
+// Used by the kitchen requisition screen to show current station stock.
+router.get('/station-stock/:stationId', async (req, res) => {
+  try {
+    const stationId = req.params.stationId;
+    // Find the most recent confirmed closing snapshot for this station
+    const snaps = await query(`
+      SELECT id FROM store_kitchen_snapshots
+      WHERE station_id = ? AND snapshot_type = 'CLOSING' AND status = 'CONFIRMED'
+      ORDER BY snapshot_date DESC
+      LIMIT 1
+    `, [stationId]);
+
+    if (!snaps.length) {
+      return res.json({ station_id: stationId, snapshot_date: null, items: [] });
+    }
+
+    const snapId = snaps[0].id;
+    const items = await query(`
+      SELECT
+        ski.inventory_item_id,
+        i.name,
+        i.unit_of_measure,
+        ski.counted_quantity AS station_qty
+      FROM store_kitchen_snapshot_items ski
+      JOIN store_inventory i ON i.id = ski.inventory_item_id
+      WHERE ski.snapshot_id = ?
+      ORDER BY i.name
+    `, [snapId]);
+
+    res.json({ station_id: stationId, snapshot_date: snaps[0]?.snapshot_date, items });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /api/kitchen-counts/snapshots/:stationId ──────────────────────────────
 // List recent snapshots for a station — used by the storekeeper confirm screen.
 // Query param: ?days=7 (default 7)

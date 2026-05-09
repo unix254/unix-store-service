@@ -6,6 +6,8 @@ class Requisition {
   final double quantity;
   final String? unitOfMeasure;
   final String requestedBy;
+  /// Station / location name the item was requested from (e.g. "Main Kitchen").
+  final String? requesterLocation;
   final String purpose;   // 'Sales' | 'Staff Meal' | 'Wastage' | 'Other'
   final String status;    // 'Pending' | 'Approved' | 'Issued' | 'Rejected'
   final String? notes;
@@ -18,6 +20,10 @@ class Requisition {
   final String? issueNotes;
   /// Number of timeline entries (system events + comments) on this requisition.
   final int timelineCount;
+  /// Current store inventory balance for this item (null for new-item requests).
+  final double? storeQty;
+  /// Last confirmed kitchen-station closing qty for this item at the requester's station.
+  final double? stationQty;
 
   const Requisition({
     required this.id,
@@ -27,6 +33,7 @@ class Requisition {
     required this.quantity,
     this.unitOfMeasure,
     required this.requestedBy,
+    this.requesterLocation,
     required this.purpose,
     required this.status,
     this.notes,
@@ -36,25 +43,30 @@ class Requisition {
     this.issuedQuantity,
     this.issueNotes,
     this.timelineCount = 0,
+    this.storeQty,
+    this.stationQty,
   });
 
   factory Requisition.fromJson(Map<String, dynamic> j) => Requisition(
-        id:               j['id'] as String,
-        inventoryItemId:  j['inventory_item_id'] as String?,
-        itemName:         j['item_name'] as String? ?? '[New Item Request]',
-        itemUom:          j['item_uom'] as String?,
-        quantity:         double.tryParse(j['quantity']?.toString() ?? '0') ?? 0,
-        unitOfMeasure:    j['unit_of_measure'] as String?,
-        requestedBy:      j['requested_by'] as String? ?? '—',
-        purpose:          j['purpose'] as String? ?? 'Sales',
-        status:           j['status'] as String? ?? 'Pending',
-        notes:            j['notes'] as String?,
-        requestedAt:      j['requested_at'] as String? ?? '',
-        issuedAt:         j['issued_at'] as String?,
-        issuedBy:         j['issued_by'] as String?,
-        issuedQuantity:   double.tryParse(j['issued_quantity']?.toString() ?? ''),
-        issueNotes:       j['issue_notes'] as String?,
-        timelineCount:    int.tryParse(j['timeline_count']?.toString() ?? '0') ?? 0,
+        id:                j['id'] as String,
+        inventoryItemId:   j['inventory_item_id'] as String?,
+        itemName:          j['item_name'] as String? ?? '[New Item Request]',
+        itemUom:           j['item_uom'] as String?,
+        quantity:          double.tryParse(j['quantity']?.toString() ?? '0') ?? 0,
+        unitOfMeasure:     j['unit_of_measure'] as String?,
+        requestedBy:       j['requested_by'] as String? ?? '—',
+        requesterLocation: j['requester_location'] as String?,
+        purpose:           j['purpose'] as String? ?? 'Sales',
+        status:            j['status'] as String? ?? 'Pending',
+        notes:             j['notes'] as String?,
+        requestedAt:       j['requested_at'] as String? ?? '',
+        issuedAt:          j['issued_at'] as String?,
+        issuedBy:          j['issued_by'] as String?,
+        issuedQuantity:    double.tryParse(j['issued_quantity']?.toString() ?? ''),
+        issueNotes:        j['issue_notes'] as String?,
+        timelineCount:     int.tryParse(j['timeline_count']?.toString() ?? '0') ?? 0,
+        storeQty:          double.tryParse(j['store_qty']?.toString() ?? ''),
+        stationQty:        double.tryParse(j['station_qty']?.toString() ?? ''),
       );
 
   bool get isPending   => status == 'Pending';

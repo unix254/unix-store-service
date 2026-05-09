@@ -663,6 +663,13 @@ class ApiService {
     return data as Map<String, dynamic>;
   }
 
+  /// Returns the most recent confirmed closing snapshot quantities for a station.
+  /// Used by the requisition screen to show "current station stock" per item.
+  Future<Map<String, dynamic>> getStationStock(String stationId) async {
+    final data = await _get('/api/kitchen-counts/station-stock/$stationId');
+    return data as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> submitClosingCount({
     required String stationId,
     required String countedBy,

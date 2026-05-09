@@ -24,10 +24,25 @@ const REQ_COLS = `
   r.*,
   i.name               AS item_name,
   i.unit_of_measure    AS item_uom,
+  i.quantity_in_stock  AS store_qty,
   COALESCE((
     SELECT COUNT(*) FROM store_requisition_timeline t
     WHERE t.requisition_id = r.id
-  ), 0)                AS timeline_count
+  ), 0)                AS timeline_count,
+  -- Latest confirmed closing snapshot qty for this item at the requester's station.
+  -- Helps storekeepers see station balance directly on the request card.
+  (
+    SELECT ski.counted_quantity
+    FROM store_kitchen_snapshot_items ski
+    JOIN store_kitchen_snapshots sk ON sk.id = ski.snapshot_id
+    JOIN store_stations ss ON ss.id = sk.station_id
+    WHERE ski.inventory_item_id = r.inventory_item_id
+      AND ss.name = r.requester_location
+      AND sk.snapshot_type = 'CLOSING'
+      AND sk.status = 'CONFIRMED'
+    ORDER BY sk.snapshot_date DESC
+    LIMIT 1
+  ) AS station_qty
 `;
 
 // GET /api/requisitions  – list all (optionally filter by status / purpose)

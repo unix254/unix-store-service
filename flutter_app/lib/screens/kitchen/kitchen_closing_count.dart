@@ -45,7 +45,15 @@ class _KitchenClosingCountState extends State<KitchenClosingCountScreen> {
     setState(() { _loadingStations = true; _error = null; });
     try {
       final data = await ApiService.instance.getStationsSummary();
-      final stations = data.map((j) => StationSummary.fromJson(j)).toList();
+      var stations = data.map((j) => StationSummary.fromJson(j)).toList();
+
+      // Kitchen staff only see their own station.
+      // Managers, owners and storekeepers see all stations.
+      final loc = widget.staff.locationName;
+      if (widget.staff.isKitchen && loc != null && loc.isNotEmpty) {
+        stations = stations.where((s) => s.name == loc).toList();
+      }
+
       if (!mounted) return;
       setState(() {
         _stations = stations;
