@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../config/theme.dart';
 import '../../models/staff.dart';
-import '../../models/station.dart';
+import '../../models/station.dart' hide Station;
 import '../../services/api.dart';
 
 /// Storekeeper Kitchen Ledger Screen.
@@ -20,6 +20,7 @@ class KitchenLedgerScreen extends StatefulWidget {
 class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
   List<KitchenLedgerRow> _rows = [];
   List<Map<String, dynamic>> _stations = [];
+  List<StationSummary> _stationSummaries = [];
   bool _loading = true;
   String? _error;
 
@@ -27,7 +28,6 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
   String? _filterStationId;
   String? _filterStationName;
 
-  // Confirm dialog state
   bool _confirming = false;
 
   @override
@@ -49,17 +49,31 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
     } catch (_) {}
   }
 
+  Future<void> _loadSummaries() async {
+    try {
+      final data = await ApiService.instance.getStationsSummary();
+      final summaries = data.map((j) => StationSummary.fromJson(j)).toList();
+      if (!mounted) return;
+      setState(() => _stationSummaries = summaries);
+    } catch (_) {}
+  }
+
   Future<void> _load() async {
     if (!mounted) return;
     setState(() { _loading = true; _error = null; });
     try {
-      final data = await ApiService.instance.getKitchenLedger(
-        _dateStr, stationId: _filterStationId);
-      final rows = (data['rows'] as List)
+      final results = await Future.wait([
+        ApiService.instance.getKitchenLedger(_dateStr, stationId: _filterStationId),
+        ApiService.instance.getStationsSummary(),
+      ]);
+      final ledgerData = results[0] as Map<String, dynamic>;
+      final summaryData = results[1] as List<Map<String, dynamic>>;
+      final rows = (ledgerData['rows'] as List)
           .map((j) => KitchenLedgerRow.fromJson(j as Map<String, dynamic>))
           .toList();
+      final summaries = summaryData.map((j) => StationSummary.fromJson(j)).toList();
       if (!mounted) return;
-      setState(() { _rows = rows; _loading = false; });
+      setState(() { _rows = rows; _stationSummaries = summaries; _loading = false; });
     } catch (e) {
       if (!mounted) return;
       setState(() { _error = e.toString(); _loading = false; });
@@ -85,13 +99,13 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
     }
   }
 
-  Future<void> _confirmSnapshot(String snapshotId, String type) async {
+  Future<void> _confirmSnapshot(String snapshotId, String stationName, String type) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Confirm ${type} Count'),
+        title: Text('Confirm $type Count'),
         content: Text(
-          'Lock this ${type.toLowerCase()} count as the operational truth? '
+          'Lock the $stationName $type count as the operational truth? '
           'This cannot be undone without contacting ICT admin.',
         ),
         actions: [
@@ -118,6 +132,60 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
         SnackBar(content: Text('Error: $e'), backgroundColor: AppTheme.debtRed),
       );
     }
+  }
+
+  List<Widget> _buildPendingPanel() {
+    final pending = _stationSummaries.where(
+      (s) => s.closingPendingConfirm || s.openingPendingConfirm,
+    ).toList();
+    if (pending.isEmpty) return [];
+
+    return [
+      Container(
+        margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.amber.shade50,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.amber.shade300),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(Icons.pending_actions_rounded, color: Colors.amber.shade700, size: 18),
+              const SizedBox(width: 8),
+              Text('Awaiting Confirmation',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
+                      color: Colors.amber.shade800)),
+            ]),
+            const SizedBox(height: 8),
+            ...pending.expand((s) {
+              final tiles = <Widget>[];
+              if (s.closingPendingConfirm && s.closingSnapshotId != null) {
+                tiles.add(_PendingTile(
+                  stationName: s.name,
+                  type: 'Closing',
+                  confirming: _confirming,
+                  onConfirm: () => _confirmSnapshot(
+                      s.closingSnapshotId!, s.name, 'Closing'),
+                ));
+              }
+              if (s.openingPendingConfirm && s.openingSnapshotId != null) {
+                tiles.add(_PendingTile(
+                  stationName: s.name,
+                  type: 'Opening',
+                  confirming: _confirming,
+                  onConfirm: () => _confirmSnapshot(
+                      s.openingSnapshotId!, s.name, 'Opening'),
+                ));
+              }
+              return tiles;
+            }),
+          ],
+        ),
+      ),
+    ];
   }
 
   @override
@@ -228,6 +296,9 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
           ),
         ),
 
+        // ── Pending Confirmations ───────────────────────────────
+        ..._buildPendingPanel(),
+
         if (_error != null)
           Container(
             margin: const EdgeInsets.all(16),
@@ -244,11 +315,7 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
               ? const Center(child: CircularProgressIndicator())
               : _rows.isEmpty
                   ? _EmptyState(date: fmt.format(_selectedDate))
-                  : _LedgerTable(
-                      rows: _rows,
-                      staffName: widget.staff.name,
-                      onConfirm: _confirmSnapshot,
-                    ),
+                  : _LedgerTable(rows: _rows),
         ),
       ],
     );
@@ -259,14 +326,8 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
 
 class _LedgerTable extends StatelessWidget {
   final List<KitchenLedgerRow> rows;
-  final String staffName;
-  final void Function(String snapshotId, String type) onConfirm;
 
-  const _LedgerTable({
-    required this.rows,
-    required this.staffName,
-    required this.onConfirm,
-  });
+  const _LedgerTable({required this.rows});
 
   @override
   Widget build(BuildContext context) {
@@ -477,4 +538,48 @@ class _EmptyState extends StatelessWidget {
       ],
     ),
   );
+}
+
+class _PendingTile extends StatelessWidget {
+  final String stationName;
+  final String type;
+  final bool confirming;
+  final VoidCallback onConfirm;
+
+  const _PendingTile({
+    required this.stationName,
+    required this.type,
+    required this.confirming,
+    required this.onConfirm,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          Icon(
+            type == 'Closing' ? Icons.nights_stay_rounded : Icons.wb_sunny_rounded,
+            size: 16,
+            color: Colors.amber.shade700,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('$stationName — $type Count',
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+          ),
+          FilledButton(
+            onPressed: confirming ? null : onConfirm,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.paidGreen,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+            child: const Text('Confirm & Lock'),
+          ),
+        ],
+      ),
+    );
+  }
 }

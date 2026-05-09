@@ -55,7 +55,9 @@ router.get('/stations-summary', async (req, res) => {
         s.name,
         s.description,
         MAX(CASE WHEN sk.snapshot_type = 'CLOSING' THEN sk.status END) AS closing_status,
-        MAX(CASE WHEN sk.snapshot_type = 'OPENING' THEN sk.status END) AS opening_status
+        MAX(CASE WHEN sk.snapshot_type = 'OPENING' THEN sk.status END) AS opening_status,
+        MAX(CASE WHEN sk.snapshot_type = 'CLOSING' THEN sk.id END) AS closing_snapshot_id,
+        MAX(CASE WHEN sk.snapshot_type = 'OPENING' THEN sk.id END) AS opening_snapshot_id
       FROM store_stations s
       LEFT JOIN store_kitchen_snapshots sk
         ON sk.station_id = s.id AND sk.snapshot_date = ?

@@ -89,6 +89,8 @@ class StationSummary {
   final String? description;
   final String? closingStatus;
   final String? openingStatus;
+  final String? closingSnapshotId;
+  final String? openingSnapshotId;
 
   const StationSummary({
     required this.id,
@@ -96,19 +98,26 @@ class StationSummary {
     this.description,
     this.closingStatus,
     this.openingStatus,
+    this.closingSnapshotId,
+    this.openingSnapshotId,
   });
 
   factory StationSummary.fromJson(Map<String, dynamic> j) => StationSummary(
-    id:            j['id'] as String,
-    name:          j['name'] as String,
-    description:   j['description'] as String?,
-    closingStatus: j['closing_status'] as String?,
-    openingStatus: j['opening_status'] as String?,
+    id:                j['id'] as String,
+    name:              j['name'] as String,
+    description:       j['description'] as String?,
+    closingStatus:     j['closing_status'] as String?,
+    openingStatus:     j['opening_status'] as String?,
+    closingSnapshotId: j['closing_snapshot_id'] as String?,
+    openingSnapshotId: j['opening_snapshot_id'] as String?,
   );
 
   bool get closingDone => closingStatus != null;
   bool get closingConfirmed => closingStatus == 'CONFIRMED';
   bool get openingDone => openingStatus != null;
+  bool get openingConfirmed => openingStatus == 'CONFIRMED';
+  bool get closingPendingConfirm => closingStatus == 'SUBMITTED';
+  bool get openingPendingConfirm => openingStatus == 'SUBMITTED';
 }
 
 class CountItem {
