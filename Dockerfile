@@ -13,6 +13,10 @@ RUN flutter build web --release --base-href / -v
 # ── Stage 2: Node.js Runtime ───────────────────────────────────────────────
 FROM node:20-alpine
 
+# Bake EAT timezone in so business-day cutoff is always 07:00 EAT regardless
+# of how the container is launched (compose, Docker Hub pull, or bare docker run).
+ENV TZ=Africa/Nairobi
+
 WORKDIR /app
 
 COPY package*.json ./
