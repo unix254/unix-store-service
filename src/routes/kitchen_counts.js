@@ -244,22 +244,21 @@ router.post('/closing', async (req, res) => {
 // The frontend uses risk_tier to decide blind vs confirm UX per item.
 router.get('/opening-data/:stationId', async (req, res) => {
   const { stationId } = req.params;
-  const today     = todayBusinessDate();
-  const yesterday = (() => {
-    const d = new Date(today);
-    d.setDate(d.getDate() - 1);
-    return d.toISOString().slice(0, 10);
-  })();
+  const today = todayBusinessDate();
 
   try {
-    // Get yesterday's closing count (the basis for today's opening)
+    // Get the most recent CONFIRMED closing snapshot as the opening basis.
+    // We prefer yesterday's, but fall back to the latest available so that
+    // same-day testing and catch-up scenarios work correctly.
     const prevSnap = await query(`
       SELECT sk.id, sk.snapshot_date, sk.status, sk.counted_by
       FROM store_kitchen_snapshots sk
-      WHERE sk.station_id = ? AND sk.snapshot_date = ? AND sk.snapshot_type = 'CLOSING'
-      ORDER BY sk.status DESC
+      WHERE sk.station_id = ? AND sk.snapshot_type = 'CLOSING'
+        AND sk.status = 'CONFIRMED'
+        AND sk.snapshot_date <= ?
+      ORDER BY sk.snapshot_date DESC
       LIMIT 1
-    `, [stationId, yesterday]);
+    `, [stationId, today]);
 
     let closingItems = [];
     if (prevSnap.length) {
