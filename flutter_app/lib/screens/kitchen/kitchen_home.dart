@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../config/theme.dart';
 import '../../models/staff.dart';
+import '../pin_login.dart';
 import 'kitchen_requisition.dart';
 import 'kitchen_closing_count.dart';
 import 'kitchen_opening_count.dart';
@@ -41,6 +42,15 @@ class KitchenHome extends StatelessWidget {
                             style: const TextStyle(
                                 fontSize: 13, color: AppTheme.pinMuted)),
                       ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.logout_rounded),
+                    color: Colors.grey.shade500,
+                    tooltip: 'Log Out',
+                    onPressed: () => Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(
+                          builder: (_) => const PinLoginScreen()),
                     ),
                   ),
                 ],

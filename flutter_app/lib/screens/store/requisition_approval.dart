@@ -767,7 +767,7 @@ class _RequisitionCard extends StatelessWidget {
   }
 
   String _formatTime(String raw) {
-    final dt = DateTime.tryParse(raw);
+    final dt = DateTime.tryParse(raw)?.toLocal();
     if (dt == null) return '–';
     final now = DateTime.now();
     if (dt.day == now.day) return _timeFmt.format(dt);

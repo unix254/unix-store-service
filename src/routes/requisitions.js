@@ -90,7 +90,7 @@ router.get('/:id', async (req, res) => {
 // Normal:    { inventory_item_id, quantity, unit_of_measure, requested_by, purpose, notes }
 // New item:  { item_name, unit, quantity, requested_by, purpose?, notes? }
 router.post('/', async (req, res) => {
-  const { inventory_item_id, item_name, quantity, unit, unit_of_measure, requested_by, purpose, notes } = req.body;
+  const { inventory_item_id, item_name, quantity, unit, unit_of_measure, requested_by, purpose, notes, requester_location } = req.body;
 
   if (!quantity || !requested_by) {
     return res.status(400).json({ error: 'quantity and requested_by are required' });
@@ -114,10 +114,10 @@ router.post('/', async (req, res) => {
   try {
     await query(
       `INSERT INTO store_requisitions
-         (id, inventory_item_id, quantity, unit_of_measure, requested_by, purpose, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (id, inventory_item_id, quantity, unit_of_measure, requested_by, requester_location, purpose, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, isNewItem ? null : inventory_item_id, quantity, resolvedUom,
-       requested_by, purpose || 'Sales', resolvedNotes]
+       requested_by, requester_location || null, purpose || 'Sales', resolvedNotes]
     );
 
     // Log creation event
