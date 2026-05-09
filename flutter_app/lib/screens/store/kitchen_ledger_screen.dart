@@ -4,6 +4,8 @@ import '../../config/theme.dart';
 import '../../models/staff.dart';
 import '../../models/station.dart' hide Station;
 import '../../services/api.dart';
+import '../kitchen/kitchen_closing_count.dart';
+import '../kitchen/kitchen_opening_count.dart';
 
 /// Storekeeper Kitchen Ledger Screen.
 /// Date-filterable audit table showing the full chronological shift picture:
@@ -134,54 +136,71 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
     }
   }
 
+  void _goTakeCount(StationSummary station, String type) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => type == 'Closing'
+            ? KitchenClosingCountScreen(staff: widget.staff)
+            : KitchenOpeningCountScreen(staff: widget.staff),
+      ),
+    );
+    // Refresh after returning so any newly submitted count appears
+    _load();
+  }
+
   List<Widget> _buildPendingPanel() {
-    final pending = _stationSummaries.where(
-      (s) => s.closingPendingConfirm || s.openingPendingConfirm,
-    ).toList();
-    if (pending.isEmpty) return [];
+    if (_stationSummaries.isEmpty) return [];
+
+    // Build one row per station for today's closing count status.
+    // For each station show: Not counted → Take Count | Submitted → Confirm | Confirmed → done
+    final rows = <Widget>[];
+    for (final s in _stationSummaries) {
+      if (s.closingConfirmed) {
+        // Fully done — show a quiet tick, no action needed
+        rows.add(_StationCountRow(
+          stationName: s.name,
+          type: 'Closing',
+          state: _CountState.confirmed,
+        ));
+      } else if (s.closingPendingConfirm && s.closingSnapshotId != null) {
+        rows.add(_StationCountRow(
+          stationName: s.name,
+          type: 'Closing',
+          state: _CountState.submitted,
+          confirming: _confirming,
+          onConfirm: () => _confirmSnapshot(s.closingSnapshotId!, s.name, 'Closing'),
+        ));
+      } else {
+        rows.add(_StationCountRow(
+          stationName: s.name,
+          type: 'Closing',
+          state: _CountState.notDone,
+          onTakeCount: () => _goTakeCount(s, 'Closing'),
+        ));
+      }
+    }
 
     return [
       Container(
         margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.amber.shade50,
+          color: const Color(0xFFF8F9FA),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.amber.shade300),
+          border: Border.all(color: const Color(0xFFE0E0E0)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
-              Icon(Icons.pending_actions_rounded, color: Colors.amber.shade700, size: 18),
+              const Icon(Icons.nights_stay_rounded, color: AppTheme.pinTeal, size: 16),
               const SizedBox(width: 8),
-              Text('Awaiting Confirmation',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-                      color: Colors.amber.shade800)),
+              const Text("Today's Closing Counts",
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
             ]),
             const SizedBox(height: 8),
-            ...pending.expand((s) {
-              final tiles = <Widget>[];
-              if (s.closingPendingConfirm && s.closingSnapshotId != null) {
-                tiles.add(_PendingTile(
-                  stationName: s.name,
-                  type: 'Closing',
-                  confirming: _confirming,
-                  onConfirm: () => _confirmSnapshot(
-                      s.closingSnapshotId!, s.name, 'Closing'),
-                ));
-              }
-              if (s.openingPendingConfirm && s.openingSnapshotId != null) {
-                tiles.add(_PendingTile(
-                  stationName: s.name,
-                  type: 'Opening',
-                  confirming: _confirming,
-                  onConfirm: () => _confirmSnapshot(
-                      s.openingSnapshotId!, s.name, 'Opening'),
-                ));
-              }
-              return tiles;
-            }),
+            ...rows,
           ],
         ),
       ),
@@ -540,44 +559,103 @@ class _EmptyState extends StatelessWidget {
   );
 }
 
-class _PendingTile extends StatelessWidget {
+enum _CountState { notDone, submitted, confirmed }
+
+class _StationCountRow extends StatelessWidget {
   final String stationName;
   final String type;
+  final _CountState state;
   final bool confirming;
-  final VoidCallback onConfirm;
+  final VoidCallback? onConfirm;
+  final VoidCallback? onTakeCount;
 
-  const _PendingTile({
+  const _StationCountRow({
     required this.stationName,
     required this.type,
-    required this.confirming,
-    required this.onConfirm,
+    required this.state,
+    this.confirming = false,
+    this.onConfirm,
+    this.onTakeCount,
   });
 
   @override
   Widget build(BuildContext context) {
+    final Widget badge;
+    final Widget? action;
+
+    switch (state) {
+      case _CountState.confirmed:
+        badge = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: AppTheme.paidGreen.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: const Text('Confirmed',
+              style: TextStyle(fontSize: 11, color: AppTheme.paidGreen,
+                  fontWeight: FontWeight.w700)),
+        );
+        action = null;
+
+      case _CountState.submitted:
+        badge = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: Colors.amber.shade100,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text('Awaiting confirmation',
+              style: TextStyle(fontSize: 11, color: Colors.amber.shade800,
+                  fontWeight: FontWeight.w600)),
+        );
+        action = FilledButton(
+          onPressed: confirming ? null : onConfirm,
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.paidGreen,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+          ),
+          child: const Text('Confirm & Lock'),
+        );
+
+      case _CountState.notDone:
+        badge = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text('Not counted',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+        );
+        action = OutlinedButton(
+          onPressed: onTakeCount,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppTheme.pinTeal,
+            side: const BorderSide(color: AppTheme.pinTeal),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+          ),
+          child: const Text('Take Count'),
+        );
+    }
+
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Row(
         children: [
-          Icon(
-            type == 'Closing' ? Icons.nights_stay_rounded : Icons.wb_sunny_rounded,
-            size: 16,
-            color: Colors.amber.shade700,
-          ),
-          const SizedBox(width: 8),
           Expanded(
-            child: Text('$stationName — $type Count',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-          ),
-          FilledButton(
-            onPressed: confirming ? null : onConfirm,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.paidGreen,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(stationName,
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 2),
+                badge,
+              ],
             ),
-            child: const Text('Confirm & Lock'),
           ),
+          if (action != null) action,
         ],
       ),
     );
