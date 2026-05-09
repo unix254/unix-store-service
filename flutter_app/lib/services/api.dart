@@ -255,14 +255,16 @@ class ApiService {
     required String requestedBy,
     required String purpose,
     String? notes,
+    String? requesterLocation,
   }) async {
     final data = await _post('/api/requisitions', {
-      'inventory_item_id': inventoryItemId,
-      'quantity':          quantity,
-      'unit_of_measure':   unitOfMeasure,
-      'requested_by':      requestedBy,
-      'purpose':           purpose,
-      'notes':             notes,
+      'inventory_item_id':  inventoryItemId,
+      'quantity':           quantity,
+      'unit_of_measure':    unitOfMeasure,
+      'requested_by':       requestedBy,
+      'purpose':            purpose,
+      'notes':              notes,
+      if (requesterLocation != null) 'requester_location': requesterLocation,
     });
     return data['id'] as String;
   }

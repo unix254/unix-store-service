@@ -307,12 +307,13 @@ class _KitchenRequisitionScreenState extends State<KitchenRequisitionScreen> {
     try {
       for (final b in _basket) {
         await ApiService.instance.submitRequisition(
-          inventoryItemId: b.item.id,
-          quantity:        b.qty,
-          unitOfMeasure:   b.item.unitOfMeasure,
-          requestedBy:     widget.staff.name,
-          purpose:         b.purpose,
-          notes:           notes,
+          inventoryItemId:   b.item.id,
+          quantity:          b.qty,
+          unitOfMeasure:     b.item.unitOfMeasure,
+          requestedBy:       widget.staff.name,
+          purpose:           b.purpose,
+          notes:             notes,
+          requesterLocation: widget.staff.locationName,
         );
       }
       HapticFeedback.heavyImpact();
