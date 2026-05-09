@@ -19,6 +19,13 @@ class KitchenLedgerScreen extends StatefulWidget {
   State<KitchenLedgerScreen> createState() => _KitchenLedgerScreenState();
 }
 
+// Mirror the server's todayBusinessDate(): UTC − 7 h, then take the date.
+// Business day runs 07:00 UTC → 07:00 UTC (= 10:00 EAT → 10:00 EAT).
+DateTime _businessDate() {
+  final shifted = DateTime.now().toUtc().subtract(const Duration(hours: 7));
+  return DateTime(shifted.year, shifted.month, shifted.day);
+}
+
 class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
   List<KitchenLedgerRow> _rows = [];
   List<Map<String, dynamic>> _stations = [];
@@ -26,7 +33,7 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
   bool _loading = true;
   String? _error;
 
-  DateTime _selectedDate = DateTime.now();
+  DateTime _selectedDate = _businessDate();
   String? _filterStationId;
   String? _filterStationName;
 
@@ -87,7 +94,7 @@ class _KitchenLedgerScreenState extends State<KitchenLedgerScreen> {
       context: context,
       initialDate: _selectedDate,
       firstDate: DateTime(2026),
-      lastDate: DateTime.now(),
+      lastDate: _businessDate(),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
           colorScheme: const ColorScheme.light(primary: AppTheme.pinTeal),
